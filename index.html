@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Capture Demo</title>
+  </head>
+  <body>
+    <h1>Capture Demo</h1>
+    <video id="cam" autoplay playsinline width="480"></video>
+    <br />
+    <button id="start">Start camera</button>
+    <button id="shot">Capture</button>
+    <input type="file" id="up" accept="image/*" />
+    <br />
+    <canvas
+      id="frame"
+      width="480"
+      height="360"
+      style="border: 1px solid #ccc"
+    ></canvas>
+    <pre id="out">Results appear here</pre>
+    <script>
+      const video = document.getElementById("cam");
+      const canvas = document.getElementById("frame");
+      const out = document.getElementById("out");
+
+      document.getElementById("start").onclick = async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: false,
+        });
+        video.srcObject = stream;
+      };
+
+      async function send(blob) {
+        const fd = new FormData();
+        fd.append("file", blob, "shot.jpg");
+        const res = await fetch("/detect", { method: "POST", body: fd });
+        out.textContent = JSON.stringify(await res.json(), null, 2);
+      }
+
+      document.getElementById("shot").onclick = () => {
+        canvas
+          .getContext("2d")
+          .drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(send, "image/jpeg");
+      };
+
+      document.getElementById("up").onchange = (e) => {
+        if (e.target.files[0]) send(e.target.files[0]);
+      };
+    </script>
+  </body>
+</html>

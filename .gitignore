@@ -1,1 +1,7 @@
 .venv/
+__pycache__/
+*.pt
+weights/
+runs/
+pip-*
+.dist/
