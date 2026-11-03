@@ -20,7 +20,7 @@ flushSave sets savingRef but never uses it to prevent overlapping saves or await
 
 Required: one in-flight save per note; associate responses with the originating draft; acknowledge Saved only for the latest confirmed text; stop automatic conflict retries; test delayed save responses combined with typing, switching, and conflict resolution.
 
-### R3 — Medium: pasted code exceeds the backend note budget
+### R3 — Medium: pasted code exceeds the backend note budget (fix in progress)
 
 Files: extension/src/panel/App.tsx; extension/src/background.ts; backend/schemas.py
 
@@ -28,13 +28,33 @@ Paste fallback accepts up to 50,000 characters and stores code as a note. buildS
 
 Required: reconcile the paste-code channel and aggregate note budget across UI, request construction, and backend. Prefer sending pasted code as explicit code context with its own limit; otherwise enforce an explained bound before submission. Do not silently discard content.
 
-### R4 — Medium: model request bypasses persisted note snapshots
+Latest scan: shared/payload.ts now enforces the aggregate transport budget and generates warnings. However, beginSummary still slices each note to 10,000 characters before the payload helper sees it. A single 15,000-character note therefore loses 5,000 characters without triggering that helper's warning. Preserve original length metadata or move all trimming into the warning-producing stage. Ensure the UI actually displays job warnings.
+
+### R4 — Medium: model request bypasses persisted note snapshots (source fix observed; tests pending)
 
 Files: extension/src/background.ts (buildSummaryPayload); extension/src/storage/repository.ts (beginSummary)
 
 beginSummary persists includedNoteSnapshots, then buildSummaryPayload rereads live notes in a separate operation. Edits between these steps can change what is sent relative to the saved request record. It also bypasses the snapshot truncation logic.
 
 Required: construct payload from the exact job and captured note snapshots returned by beginSummary, with shared aggregate validation. Ensure request ID and input refer to the same job. Add a test where notes change immediately after SUMMARY_BEGIN.
+
+Latest scan: beginSummary now returns the checkpoint, job, and captured notes in one queued operation, and the shared payload builder uses those values. This addresses the live-note reread race; validate the full calling path and regression tests after this batch settles.
+
+### R5 — Medium: history retry bypasses disabled AI setting
+
+Files: extension/src/panel/App.tsx; extension/src/panel/components/HistoryView.tsx
+
+runSummary checks busySummary but not aiEnabled. History's Retry invokes it without the consent guard used by ResumeView. After a failed request, disabling AI and clicking Retry in History can still send the checkpoint to the provider.
+
+Required: enforce AI enablement at the common request boundary, not only through a disabled button. Test retry after disabling AI and reflect the disabled state in History.
+
+### R6 — Medium: partial code has no paste fallback
+
+File: extension/src/panel/components/ResumeView.tsx
+
+The paste box is shown only when checkpoint.code is empty. The current LeetCode extractor captures visible lines and labels them partial, so the common incomplete-code case hides the fallback needed to supply the full attempt.
+
+Required: offer a clearly labeled full-code override when code quality is partial as well as unavailable, and define how that override takes precedence over the partial snapshot during summarization. Keep the original checkpoint immutable.
 
 ## Previously reported changes now visible in source
 
