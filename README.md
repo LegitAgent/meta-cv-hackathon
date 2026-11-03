@@ -1,33 +1,33 @@
-# meta-cv-hackathon
-Meta Global AI Developer Hackathon
+# Backtrack
 
-## Goal
-Take a screenshot (e.g. phone, laptop, dog) and turn it into a beginner-friendly study guide with sources.
+Meta Global AI Developer Hackathon — Build for Your World
 
-Demo scope is 3 targets only: phone, laptop, dog. One working flow beats full-room detection.
+**Leave your work. Keep your place.**
 
-## Pipeline
-1. Input: live capture first (phone / laptop camera via browser), upload as fallback.
-2. Detect: open-vocab detector finds boxes for phone / laptop / dog. User picks one if several match.
-3. Overview: crop the picked box, send to vision model for short summary. Show it in side panel.
-4. Prompt: ask "Want to learn how this works?" If no, stop here.
-5. Level check: ask familiarity - total beginner, some idea, degree-level. Default is assume nothing.
-6. Study guide: generate Chapter 1 only, beginner-first. Next chapters on demand.
-7. Sources + quiz: each chapter has links/sources and a 3-question check. Side panel shows guide, sources, quiz.
+Backtrack is a proposed Chrome extension that saves your working context with one click, creates an AI recap, and helps you resume after an interruption. Persistent note tabs provide an optional place for thoughts, similar to Windows Notepad.
 
-## Non-goals for hackathon
-Full-room multi-object scan, full course upfront, generated 3D internals. Add those only after the 3-object flow works live.
+## Why
 
-## Setup (fresh clone)
+I solve coding problems, get distracted, and sometimes return without remembering where I stopped. Writing documentation before every break would become another chore. Capturing context should require minimal effort; notes should be optional.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-pip install fastapi uvicorn python-multipart
-.\.venv\Scripts\python -m uvicorn app:app --host 127.0.0.1 --port 8000
-```
+## Planned MVP
 
-Open http://127.0.0.1:8000 in your browser. Click Start camera, then Capture. Upload works as fallback.
+- User-triggered page checkpoints, initially focused on LeetCode.
+- Grounded AI recaps and one suggested next action.
+- Autosaving note tabs that persist across browser restarts.
+- Local checkpoint history and a lightweight activity log.
+- Resume view with saved code, context, and source link.
 
-First run downloads `yolov8s-worldv2.pt` automatically. Leave that terminal running while you demo.
+Notes and history use extension-local storage. AI summaries send selected checkpoint content through a backend to a configured model provider; local storage does not mean offline AI.
+
+## Status
+
+Backtrack implementation lives in `extension/` and `backend/`. See [extension/README.md](extension/README.md) for extension build instructions. The earlier camera prototype source is archived in `docs/archive/camera-prototype/`; its downloaded model weights and root caches were removed.
+
+Read [SPEC.md](SPEC.md) for product requirements and [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) for architecture, storage contracts, backend APIs, and implementation steps. Previous documents are preserved in [docs/archive](docs/archive/).
+
+## Model and deadline
+
+Use Muse through one verified provider. Baseten, Fireworks, and Modal are available options, but model access and credits need verification. The supplied Baseten hackathon identifier is `meta-models/muse-spark-open-1026`.
+
+Deadline: November 5, 2026. Prioritize capture, persistence, notes, and a useful recap. Voice, automatic tracking, and blocking are deferred.

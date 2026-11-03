@@ -5,3 +5,9 @@ weights/
 runs/
 pip-*
 .dist/
+
+backend/.env
+extension/dist/
+extension/node_modules/
+
+.npm-cache/

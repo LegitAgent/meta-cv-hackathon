@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Backtrack",
+  "version": "0.1.0",
+  "description": "Leave your work. Keep your place.",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Pause here" },
+  "side_panel": { "default_path": "panel.html" }
+}

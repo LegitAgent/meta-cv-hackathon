@@ -1,0 +1,60 @@
+// Panel-side API client. The panel owns the live note draft and executes
+// AI HTTP requests while open, with a 45s AbortController deadline.
+// Only the explicitly selected checkpoint is ever sent to the backend.
+
+import { backendSummaryResponseSchema, type BackendSummaryResponse } from "../shared/validation";
+import type { SummaryRequestPayload } from "../shared/contracts";
+
+export const PANEL_FETCH_TIMEOUT_MS = 45_000;
+
+export async function postSummary(
+  backendUrl: string,
+  payload: SummaryRequestPayload,
+  opts?: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<BackendSummaryResponse> {
+  const timeoutMs = opts?.timeoutMs ?? PANEL_FETCH_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("TIMEOUT")), timeoutMs);
+  const onExternalAbort = () => controller.abort(opts?.signal?.reason ?? new Error("ABORTED"));
+  opts?.signal?.addEventListener("abort", onExternalAbort, { once: true });
+  try {
+    const res = await fetch(`${backendUrl.replace(/\/$/, "")}/api/v1/summaries`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let code = `HTTP_${res.status}`;
+      let message = `Request failed with status ${res.status}.`;
+      try {
+        const err = (await res.json()) as { error?: { code?: string; message?: string } };
+        if (err?.error?.code) code = err.error.code;
+        if (err?.error?.message) message = err.error.message;
+      } catch {
+        // Keep the default message.
+      }
+      throw Object.assign(new Error(message), { code });
+    }
+    const json: unknown = await res.json();
+    const parsed = backendSummaryResponseSchema.safeParse(json);
+    if (!parsed.success) throw Object.assign(new Error("Backend response failed validation."), { code: "MODEL_OUTPUT_INVALID" });
+    return parsed.data;
+  } catch (e) {
+    if (e instanceof Error && (e.name === "AbortError" || /TIMEOUT|ABORTED/.test(e.message))) {
+      throw Object.assign(new Error("Summary request timed out after 45s. The checkpoint is saved; retry when ready."), {
+        code: "TIMEOUT",
+      });
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    opts?.signal?.removeEventListener("abort", onExternalAbort);
+  }
+}
+
+export async function getHealth(backendUrl: string): Promise<{ status: string; providerConfigured: boolean }> {
+  const res = await fetch(`${backendUrl.replace(/\/$/, "")}/health`);
+  if (!res.ok) throw new Error(`Backend health check failed (${res.status}).`);
+  return (await res.json()) as { status: string; providerConfigured: boolean };
+}
