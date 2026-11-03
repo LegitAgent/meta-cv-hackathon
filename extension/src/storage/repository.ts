@@ -48,6 +48,7 @@ export function defaultSummaryJob(checkpointId: string): SummaryJob {
     includedNoteSnapshots: [],
     result: null,
     error: null,
+    warnings: [],
   };
 }
 
@@ -212,10 +213,20 @@ export class Repository {
     return job ?? defaultSummaryJob(checkpointId);
   }
 
-  beginSummary(checkpointId: string, noteIds: string[]): Promise<SummaryJob> {
+  /**
+   * Open a summary job and return the exact persisted inputs in one queued
+   * operation: the checkpoint plus the note snapshots the request must send.
+   * Callers must build the request payload from these values, never by
+   * rereading live notes afterwards.
+   */
+  beginSummary(
+    checkpointId: string,
+    noteIds: string[],
+  ): Promise<{ job: SummaryJob; checkpoint: Checkpoint; notes: { id: string; revision: number; body: string }[] }> {
     return this.enqueue(async () => {
       const got = await this.area.get([keyCheckpoint(checkpointId), keySummary(checkpointId), ...noteIds.map(keyNote)]);
-      if (!got[keyCheckpoint(checkpointId)]) throw new Error("CHECKPOINT_NOT_FOUND");
+      const cp = got[keyCheckpoint(checkpointId)] as Checkpoint | undefined;
+      if (!cp) throw new Error("CHECKPOINT_NOT_FOUND");
       const prev = (got[keySummary(checkpointId)] as SummaryJob | undefined) ?? defaultSummaryJob(checkpointId);
       const snapshots = noteIds.flatMap((id) => {
         const n = got[keyNote(id)] as Note | undefined;
@@ -230,9 +241,20 @@ export class Repository {
         includedNoteSnapshots: snapshots,
         result: prev.result,
         error: null,
+        warnings: [],
       };
       await this.area.set({ [keySummary(checkpointId)]: job });
-      return job;
+      return { job, checkpoint: cp, notes: snapshots };
+    });
+  }
+
+  /** Attach transport warnings (e.g. note trimming) to the active job only. */
+  setSummaryWarnings(checkpointId: string, requestId: string, warnings: string[]): Promise<boolean> {
+    return this.enqueue(async () => {
+      const job = await this.getSummaryJob(checkpointId);
+      if (job.requestId !== requestId) return false;
+      await this.area.set({ [keySummary(checkpointId)]: { ...job, warnings } });
+      return true;
     });
   }
 

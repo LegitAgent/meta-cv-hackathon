@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildLeetCodeOutcome } from "../src/capture/leetcode";
-import { mergeSavedNote, toLastCaptureRecord } from "../src/panel/store";
+import {
+  mergeSavedNote,
+  resolveAdoptedDraft,
+  shouldClaimSaved,
+  shouldRetrySave,
+  toLastCaptureRecord,
+} from "../src/panel/store";
+import { buildSummaryPayload } from "../src/shared/payload";
+import type { Checkpoint } from "../src/shared/contracts";
 
 describe("autosave merge", () => {
   const serverNote = {
@@ -41,6 +49,87 @@ describe("capture status record", () => {
     expect(rec.checkpointId).toBeNull();
     expect(rec.code).toBe("SCRIPT_DENIED");
     expect(rec.message).toBe("denied");
+  });
+});
+
+describe("draft ownership across notes", () => {
+  const noteA = { id: "a", title: "A", body: "saved a", revision: 3 };
+  const noteB = { id: "b", title: "B", body: "saved b", revision: 7 };
+
+  it("never shows another note's pending text", () => {
+    const draft = resolveAdoptedDraft(noteB, { id: "a", title: "typing a", body: "typing a" });
+    expect(draft).toEqual({ id: "b", title: "B", body: "saved b", baseRevision: 7 });
+  });
+
+  it("keeps pending text for the incoming note under its revision", () => {
+    const draft = resolveAdoptedDraft(noteA, { id: "a", title: "typing a", body: "typing a" });
+    expect(draft).toEqual({ id: "a", title: "typing a", body: "typing a", baseRevision: 3 });
+  });
+
+  it("clears the draft when there is no incoming note", () => {
+    expect(resolveAdoptedDraft(null, { id: "a", title: "x", body: "x" })).toEqual({
+      id: null,
+      title: "",
+      body: "",
+      baseRevision: 0,
+    });
+  });
+});
+
+describe("save coordination", () => {
+  it("never auto-retries a conflict, even with text waiting", () => {
+    expect(shouldRetrySave(true, true)).toBe(false);
+    expect(shouldRetrySave(true, false)).toBe(false);
+  });
+
+  it("retries transient failures only when text is still waiting", () => {
+    expect(shouldRetrySave(false, true)).toBe(true);
+    expect(shouldRetrySave(false, false)).toBe(false);
+  });
+
+  it("claims Saved only when the outbox is empty", () => {
+    expect(shouldClaimSaved(0)).toBe(true);
+    expect(shouldClaimSaved(2)).toBe(false);
+  });
+});
+
+describe("summary payload from snapshots", () => {
+  const checkpoint = {
+    id: "c1",
+    schemaVersion: 1,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    taskKey: "x",
+    title: "Two Sum",
+    url: "https://leetcode.com/problems/two-sum/",
+    adapter: "leetcode",
+    pageText: "Given an array...",
+    selectedText: "",
+    code: "x = 1",
+    language: "python",
+    quality: { code: "partial", missingFields: [], truncatedFields: [], warnings: [] },
+  } as Checkpoint;
+
+  it("sends the persisted snapshots and matching request id, not live notes", () => {
+    const snapshots = [{ id: "n1", revision: 2, body: "tried dict" }];
+    const { payload, warnings } = buildSummaryPayload(checkpoint, "r-1", snapshots);
+    expect(payload.requestId).toBe("r-1");
+    expect(payload.checkpoint.id).toBe("c1");
+    expect(payload.notes).toEqual([{ id: "n1", body: "tried dict" }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("caps the aggregate note budget and labels every trim", () => {
+    const snapshots = [
+      { id: "n1", revision: 0, body: "x".repeat(9000) },
+      { id: "n2", revision: 0, body: "y".repeat(9000) },
+    ];
+    const { payload, warnings } = buildSummaryPayload(checkpoint, "r-2", snapshots);
+    const total = payload.notes.reduce((n, note) => n + note.body.length, 0);
+    expect(total).toBeLessThanOrEqual(10000);
+    expect(payload.notes[0].body).toBe("x".repeat(9000));
+    expect(payload.notes[1].body.length).toBe(1000);
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.join(" ")).toMatch(/10,000-character/);
   });
 });
 

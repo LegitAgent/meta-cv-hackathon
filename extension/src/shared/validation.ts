@@ -60,6 +60,7 @@ export const summaryJobSchema = z.object({
     .max(20),
   result: summarySchema.nullable(),
   error: z.object({ code: z.string(), message: z.string().max(1000) }).nullable(),
+  warnings: z.array(z.string().max(500)).default([]),
 });
 
 export const workspaceSchema = z.object({

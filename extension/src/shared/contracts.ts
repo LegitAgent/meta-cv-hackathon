@@ -68,6 +68,7 @@ export interface SummaryJob {
   includedNoteSnapshots: NoteSnapshot[];
   result: Summary | null;
   error: { code: string; message: string } | null;
+  warnings: string[];
 }
 
 export interface Workspace {

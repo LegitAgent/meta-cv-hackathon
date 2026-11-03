@@ -7,10 +7,10 @@ import {
   nowIso,
   type Checkpoint,
   type LastCapture,
-  type SummaryRequestPayload,
   type WorkerCommand,
   type WorkerResponse,
 } from "./shared/contracts";
+import { buildSummaryPayload } from "./shared/payload";
 import { cleanUrl, taskKeyForUrl } from "./capture/types";
 import { workerCommandSchema } from "./shared/validation";
 import { Repository, type AsyncStorageArea } from "./storage/repository";
@@ -80,29 +80,7 @@ function isTrustedSender(sender: chrome.runtime.MessageSender): boolean {
   return false;
 }
 
-async function buildSummaryPayload(checkpointId: string, noteIds: string[]): Promise<SummaryRequestPayload> {
-  const got = await repo.read([`checkpoint:${checkpointId}`, `summary:${checkpointId}`, ...noteIds.map((n) => `note:${n}`)]);
-  const cp = got[`checkpoint:${checkpointId}`] as Checkpoint | undefined;
-  if (!cp) throw new Error("CHECKPOINT_NOT_FOUND");
-  const job = got[`summary:${checkpointId}`] as { requestId: string | null } | undefined;
-  const notes = noteIds.flatMap((id) => {
-    const n = got[`note:${id}`] as { id: string; body: string } | undefined;
-    return n ? [{ id: n.id, body: n.body }] : [];
-  });
-  return {
-    requestId: job?.requestId ?? newId(),
-    checkpoint: {
-      id: cp.id,
-      title: cp.title,
-      pageText: cp.pageText,
-      selectedText: cp.selectedText,
-      code: cp.code,
-      language: cp.language,
-      quality: cp.quality,
-    },
-    notes,
-  };
-}
+
 
 async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse> {
   const blocked = unsupportedReason(tabUrl);
@@ -248,9 +226,17 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
     }
     case "SUMMARY_BEGIN": {
       try {
-        const job = await repo.beginSummary(cmd.checkpointId, cmd.noteIds);
-        const payload = await buildSummaryPayload(cmd.checkpointId, cmd.noteIds);
-        return ok({ job, payload });
+        // The payload is built from the exact persisted snapshots returned
+        // here. Live notes are never reread, so edits after this point
+        // cannot change the request, and the request ID always matches
+        // the job that owns these inputs.
+        const { job, checkpoint, notes } = await repo.beginSummary(cmd.checkpointId, cmd.noteIds);
+        const built = buildSummaryPayload(checkpoint, job.requestId as string, notes);
+        if (built.warnings.length > 0) {
+          await repo.setSummaryWarnings(cmd.checkpointId, job.requestId as string, built.warnings);
+          job.warnings = built.warnings;
+        }
+        return ok({ job, payload: built.payload });
       } catch {
         return fail("CHECKPOINT_NOT_FOUND", "Checkpoint no longer exists.");
       }

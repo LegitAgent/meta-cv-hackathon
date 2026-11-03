@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Checkpoint, Note, SummaryJob } from "../shared/contracts";
 import { postSummary } from "./api";
-import { mergeSavedNote, sendCommand, snapshotFromStorage, type PanelSnapshot } from "./store";
+import {
+  mergeSavedNote,
+  resolveAdoptedDraft,
+  sendCommand,
+  shouldClaimSaved,
+  shouldRetrySave,
+  snapshotFromStorage,
+  type PanelSnapshot,
+  type PendingEdit,
+} from "./store";
 import { ResumeView, SummaryCard } from "./components/ResumeView";
 import { NoteTabs, type SaveState } from "./components/NoteTabs";
 import { HistoryView } from "./components/HistoryView";
@@ -27,8 +36,12 @@ export default function App() {
   });
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [conflictNote, setConflictNote] = useState<Note | null>(null);
+  const [conflictText, setConflictText] = useState<{ title: string; body: string } | null>(null);
   const saveTimer = useRef<number | null>(null);
-  const pendingDraft = useRef<{ title: string; body: string } | null>(null);
+  // Per-note outbox: unsent edits keyed by originating note ID. Text can
+  // never cross note boundaries because every send and every display merge
+  // is keyed by the note the text was typed in.
+  const outbox = useRef(new Map<string, PendingEdit>());
   const savingRef = useRef(false);
   // Refs keep the save path stable so timers never fire with a stale revision.
   const draftRef = useRef(draft);
@@ -61,71 +74,85 @@ export default function App() {
     return (id && snap.notes.find((n) => n.id === id)) || null;
   }, [snap]);
 
-  // When the active note changes (or a remote update lands and the local
-  // draft is clean), adopt the stored note as the draft basis.
+  // Adopt the stored note on switch/remote update. Pending text shows only
+  // when it belongs to the incoming note, so edits never cross boundaries.
   useEffect(() => {
-    if (!activeNote) {
-      setDraft({ id: null, title: "", body: "", baseRevision: 0 });
-      return;
-    }
-    setDraft((d) => {
-      const dirty = pendingDraft.current !== null || savingRef.current;
-      if (d.id !== activeNote.id || !dirty) {
-        return { id: activeNote.id, title: activeNote.title, body: activeNote.body, baseRevision: activeNote.revision };
-      }
-      return d;
-    });
+    const pending = activeNote ? outbox.current.get(activeNote.id) ?? null : null;
+    setDraft(
+      resolveAdoptedDraft(
+        activeNote,
+        pending && activeNote ? { id: activeNote.id, title: pending.title, body: pending.body } : null,
+      ),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeNote?.id, activeNote?.revision]);
 
-  // Stable save path: reads the latest draft from a ref so retries and
-  // timers never send a stale baseRevision, and a completed save never
-  // clobbers typing that arrived while it was in flight.
+  // One in-flight save at a time. Each send carries the originating note ID
+  // and base revision; each response merges only into the matching display.
+  // A completed save never clobbers typing that arrived while in flight, and
+  // revision conflicts never auto-retry: the user resolves them explicitly.
   const flushSave = useCallback(async () => {
     if (saveTimer.current !== null) {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const text = pendingDraft.current;
-    pendingDraft.current = null;
+    if (savingRef.current) {
+      if (outbox.current.size > 0) {
+        saveTimer.current = window.setTimeout(() => void flushRef.current(), AUTOSAVE_MS);
+      }
+      return;
+    }
+    // Prefer the displayed note so visible feedback lands first.
+    const curId = draftRef.current.id;
+    let key: string | undefined;
+    if (curId && outbox.current.has(curId)) key = curId;
+    else key = outbox.current.keys().next().value as string | undefined;
+    if (key === undefined) return;
+    const text = outbox.current.get(key);
     if (!text) return;
-    const latest = draftRef.current;
-    const id = latest.id;
-    if (!id) return;
+    outbox.current.delete(key);
     savingRef.current = true;
     setSaveState("saving");
+    let conflicted = false;
     try {
       const { note } = await sendCommand<{ note: Note }>({
         type: "NOTE_UPDATE",
-        id,
-        baseRevision: latest.baseRevision,
+        id: key,
+        baseRevision: text.baseRevision,
         title: text.title,
         body: text.body,
       });
-      // Adopt the new revision, but keep newer typing on screen.
-      setDraft(mergeSavedNote(note, pendingDraft.current));
-      setSaveState("saved");
+      // Merge only into the matching display; other notes are untouched.
+      // Newer same-note typing stays on screen under the new revision.
+      setDraft((d) => {
+        if (d.id !== note.id) return d;
+        const newer = outbox.current.get(note.id);
+        return mergeSavedNote(note, newer ? { title: newer.title, body: newer.body } : null);
+      });
+      if (shouldClaimSaved(outbox.current.size)) setSaveState("saved");
       setConflictNote(null);
+      setConflictText(null);
     } catch (e) {
       const code = (e as Error & { code?: string }).code;
-      // Never drop the in-flight text, and never overwrite newer typing that
-      // arrived during the save with the failed in-flight text.
-      if (pendingDraft.current === null) pendingDraft.current = text;
       if (code === "REVISION_CONFLICT") {
-        // Preserve the user's draft; ask them to resolve.
+        conflicted = true;
+        // Hold the failed text for explicit resolution; it is NOT requeued,
+        // so conflicts never retry on their own.
+        setConflictText({ title: text.title, body: text.body });
         const current = await chrome.storage.local
-          .get([`note:${id}`])
-          .then((g) => (g as Record<string, Note>)[`note:${id}`])
+          .get([`note:${key}`])
+          .then((g) => (g as Record<string, Note>)[`note:${key}`])
           .catch(() => null);
         setConflictNote(current ?? null);
         setSaveState("conflict");
       } else {
+        // Transient failure: requeue the exact text for the same note.
+        if (!outbox.current.has(key)) outbox.current.set(key, text);
         setSaveState("error");
       }
     } finally {
       savingRef.current = false;
-      // A newer draft arrived while saving: schedule another save.
-      if (pendingDraft.current) {
+      if (shouldRetrySave(conflicted, outbox.current.size > 0)) {
         saveTimer.current = window.setTimeout(() => void flushRef.current(), AUTOSAVE_MS);
       }
     }
@@ -140,8 +167,10 @@ export default function App() {
 
   const onDraftChange = useCallback(
     (d: { title: string; body: string }) => {
+      const cur = draftRef.current;
+      if (!cur.id) return;
+      outbox.current.set(cur.id, { title: d.title, body: d.body, baseRevision: cur.baseRevision });
       setDraft((prev) => ({ ...prev, title: d.title, body: d.body }));
-      pendingDraft.current = d;
       setSaveState((s) => (s === "saved" || s === "error" ? "saving" : s));
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
       saveTimer.current = window.setTimeout(() => void flushRef.current(), AUTOSAVE_MS);
@@ -149,10 +178,17 @@ export default function App() {
     [],
   );
 
+  // Drain every queued note before leaving it, so no text is left behind.
+  const drainOutbox = useCallback(async () => {
+    for (let guard = 0; guard < 50 && outbox.current.size > 0; guard++) {
+      await flushSave();
+    }
+  }, [flushSave]);
+
   // Flush on tab switch / explicit close.
   const selectNote = useCallback(
     async (id: string) => {
-      await flushSave();
+      await drainOutbox();
       await sendCommand({ type: "WORKSPACE_UPDATE", fields: { activeNoteId: id } });
       const ws = snap?.workspace;
       if (ws && !ws.openNoteIds.includes(id)) {
@@ -160,7 +196,7 @@ export default function App() {
       }
       await refresh();
     },
-    [flushSave, refresh, snap?.workspace],
+    [drainOutbox, refresh, snap?.workspace],
   );
 
   const selectedCheckpoint: Checkpoint | null = useMemo(() => {
@@ -329,9 +365,15 @@ export default function App() {
           openNoteIds={snap.workspace.openNoteIds}
           activeNoteId={snap.workspace.activeNoteId}
           onSelect={(id) => void selectNote(id)}
-          onCreate={() => void sendCommand({ type: "NOTE_CREATE", title: "Untitled note" }).then(() => refresh())}
+          onCreate={() =>
+            void (async () => {
+              await drainOutbox();
+              await sendCommand({ type: "NOTE_CREATE", title: "Untitled note" });
+              await refresh();
+            })()
+          }
           onClose={async (id) => {
-            await flushSave();
+            await drainOutbox();
             await sendCommand({ type: "NOTE_CLOSE", id });
             await refresh();
           }}
@@ -355,18 +397,23 @@ export default function App() {
           conflictNote={conflictNote}
           onResolveConflict={async (keep) => {
             if (keep === "theirs" && conflictNote) {
-              pendingDraft.current = null;
+              outbox.current.delete(conflictNote.id);
               setDraft({ id: conflictNote.id, title: conflictNote.title, body: conflictNote.body, baseRevision: conflictNote.revision });
               setConflictNote(null);
+              setConflictText(null);
               setSaveState("saved");
-            } else if (keep === "mine" && draft.id && pendingDraft.current) {
-              const current = conflictNote;
+            } else if (keep === "mine" && draft.id && conflictNote && conflictText) {
+              // Explicit user choice: requeue over the newer revision.
+              outbox.current.set(draft.id, {
+                title: conflictText.title,
+                body: conflictText.body,
+                baseRevision: conflictNote.revision,
+              });
               setConflictNote(null);
-              if (current) {
-                // Force-save over the newer revision after explicit choice.
-                setDraft((d) => ({ ...d, baseRevision: current.revision }));
-                saveTimer.current = window.setTimeout(() => void flushSave(), AUTOSAVE_MS);
-              }
+              setConflictText(null);
+              setSaveState("saving");
+              if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+              saveTimer.current = window.setTimeout(() => void flushRef.current(), AUTOSAVE_MS);
             }
           }}
         />

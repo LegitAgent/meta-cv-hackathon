@@ -81,11 +81,24 @@ describe("repository", () => {
     expect(await repo.getCheckpoint("c")).not.toBe(null);
   });
 
+  it("summary inputs are frozen at begin time", async () => {
+    const repo = new Repository(memArea());
+    await repo.createCheckpoint(cp("c3"));
+    const note = await repo.createNote("n");
+    await repo.updateNote(note.id, 0, "n", "v1");
+    const { job, notes, checkpoint } = await repo.beginSummary("c3", [note.id]);
+    await repo.updateNote(note.id, 1, "n", "v2");
+    expect(checkpoint.id).toBe("c3");
+    expect(notes).toEqual([{ id: note.id, revision: 1, body: "v1" }]);
+    expect(job.includedNoteSnapshots).toEqual([{ id: note.id, revision: 1, body: "v1" }]);
+    expect(job.requestId).toBeTruthy();
+  });
+
   it("late summary results do not overwrite newer jobs", async () => {
     const repo = new Repository(memArea());
     await repo.createCheckpoint(cp("c9"));
-    const first = await repo.beginSummary("c9", []);
-    const second = await repo.beginSummary("c9", []);
+    const { job: first } = await repo.beginSummary("c9", []);
+    const { job: second } = await repo.beginSummary("c9", []);
     expect(first.requestId).not.toBe(second.requestId);
     // Stale first result is rejected.
     expect(await repo.completeSummary("c9", first.requestId as string, summary)).toBe(false);
@@ -97,9 +110,9 @@ describe("repository", () => {
   it("failed regeneration preserves the last valid result", async () => {
     const repo = new Repository(memArea());
     await repo.createCheckpoint(cp("c2"));
-    const j1 = await repo.beginSummary("c2", []);
+    const { job: j1 } = await repo.beginSummary("c2", []);
     await repo.completeSummary("c2", j1.requestId as string, summary);
-    const j2 = await repo.beginSummary("c2", []);
+    const { job: j2 } = await repo.beginSummary("c2", []);
     expect((await repo.getSummaryJob("c2")).result).toEqual(summary);
     await repo.failSummary("c2", j2.requestId as string, { code: "HTTP_502", message: "provider down" });
     const job = await repo.getSummaryJob("c2");

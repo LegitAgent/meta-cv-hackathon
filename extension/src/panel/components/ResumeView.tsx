@@ -87,7 +87,10 @@ export function ResumeView({
               Attach pasted code
             </button>
           </div>
-          <p className="hint">Saved as a note linked to this checkpoint, auto-selected for the next recap.</p>
+          <p className="hint">
+            Saved as a note linked to this checkpoint, auto-selected for the next recap. Notes share a
+            10,000-character recap budget; longer text is trimmed and the trim is labeled above.
+          </p>
         </details>
       )}
       <div className="consent">
@@ -110,6 +113,13 @@ export function ResumeView({
           {busy ? "Summarizing…" : job?.status === "pending" ? "Retry summary" : "Generate recap"}
         </button>
       </div>
+      {job && job.warnings.length > 0 && (
+        <div className="warning">
+          {job.warnings.map((w, i) => (
+            <div key={i}>{w}</div>
+          ))}
+        </div>
+      )}
       {job?.status === "failed" && job.error && <div className="error">Summary failed ({job.error.code}): {job.error.message}</div>}
     </section>
   );
