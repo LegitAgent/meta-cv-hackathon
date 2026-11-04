@@ -297,6 +297,7 @@ export default function App() {
 
   const selectedCheckpoint: Checkpoint | null = useMemo(() => {
     if (!snap) return null;
+    if (!snap.workspace.selectedCheckpointId) return null;
     return snap.checkpoints.find((c) => c.id === snap.workspace.selectedCheckpointId) ?? snap.checkpoints[0] ?? null;
   }, [snap]);
   const selectedJob: SummaryJob | null = (selectedCheckpoint && snap?.summaries[selectedCheckpoint.id]) || null;
@@ -494,7 +495,15 @@ export default function App() {
         <>
           {snap.lastCapture && !snap.lastCapture.ok && (
             <div className="error" role="alert">
-              Last capture failed ({snap.lastCapture.code}): {snap.lastCapture.message} Nothing was saved.
+              <span>
+                Last capture failed ({snap.lastCapture.code}): {snap.lastCapture.message} Nothing was saved.
+              </span>{" "}
+              <button
+                className="link"
+                onClick={() => void chrome.storage.local.remove("meta:lastCapture").then(() => refresh()).catch(() => undefined)}
+              >
+                Dismiss
+              </button>
             </div>
           )}
           <ResumeView
@@ -676,7 +685,7 @@ export default function App() {
         <button className="link" onClick={() => void exportJson()}>
           Export JSON
         </button>
-        <span className="meta">Notes saved on this device</span>
+        <span className="meta">Notes saved on this device · v{chrome.runtime.getManifest?.().version ?? "dev"}</span>
       </footer>
       {exportError && <div className="error" role="alert">{exportError}</div>}
     </div>

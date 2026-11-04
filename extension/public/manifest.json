@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqkrPl/AutjnMM4AbByrIaBl+zj1G8sCnHJ1vf9Bp2FxIHnZACN6pFcm29nLJMGA7jRC6XFQHzD9nd3QqkVBVbTFL7siAW99ZO4YqvxcoWuFMjugLcuagL0bv3+uNK/2saNh66THR0SsmvICwG/2cKMooE4+UpPH7ZJKcCzow1IQ0HJiunTs2XlM5qx8Kp++/B9TXPyvdAiiQRT0ZhHFEtl9Iz5ojuX+9IjaZQHUtW6ZPz4t0U6C0RZSRsh/v8U7B5UCRp0vrmJs1gkcsPAcxWK867mow/OxfP2/M0pmXEXEGw+FJuztP2Yu2JbIKptHi50FNN3jbdR92ArRmUfyCgQIDAQAB",
   "name": "Backtrack",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Leave your work. Keep your place.",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage", "sidePanel", "identity", "tabs"],

@@ -292,10 +292,14 @@ export function SummaryCard({ job }: { job: SummaryJob | null }) {
         <button
           className={`primary copy-recap${copied ? " copied" : ""}`}
           onClick={copyRecap}
-          aria-label={copied ? "Copied" : "Copy recap"}
-          title={copied ? "Copied!" : "Copy recap"}
+          aria-label={copied ? "Copied" : "Copy Recap"}
+          title={copied ? "Copied!" : "Copy Recap"}
         >
-          {copied ? "Copied ✓" : "Copy recap"}
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <rect x="5" y="5" width="9" height="9" rx="2" />
+            <path d="M11 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h1" />
+          </svg>
+          {copied ? "Copied ✓" : "Copy Recap"}
         </button>
         {copyError && <div className="error" role="alert">{copyError}</div>}
       </div>

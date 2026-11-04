@@ -47,6 +47,22 @@ body {
   color: var(--ink);
 }
 
+/* Hide scrollbars but keep scrolling (panel, code, diff, guide). */
+body,
+pre.code,
+.diff-lines,
+.wiki-dialog {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+body::-webkit-scrollbar,
+pre.code::-webkit-scrollbar,
+.diff-lines::-webkit-scrollbar,
+.wiki-dialog::-webkit-scrollbar {
+  display: none;
+}
+
 .app {
   padding: 12px 12px 20px;
   display: flex;
@@ -165,6 +181,14 @@ button.primary.copied {
 
 .copy-recap {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.copy-recap svg {
+  flex: none;
 }
 
 @media (prefers-color-scheme: dark) {

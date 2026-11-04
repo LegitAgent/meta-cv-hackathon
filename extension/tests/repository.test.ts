@@ -92,6 +92,18 @@ describe("repository", () => {
     expect(report.removedWorkspaceRefs).toEqual([]);
   });
 
+  it("deleting the selected checkpoint falls back to the newest remaining", async () => {
+    const area = memArea();
+    const repo = new Repository(area);
+    await repo.createCheckpoint({ ...cp("older"), createdAt: "2026-01-01T00:00:00.000Z" });
+    await repo.createCheckpoint({ ...cp("newer"), createdAt: "2026-02-01T00:00:00.000Z" });
+    await repo.updateWorkspace({ selectedCheckpointId: "newer" });
+    expect(await repo.deleteCheckpoint("newer")).toEqual({ deleted: true });
+    expect((await repo.getWorkspace()).selectedCheckpointId).toBe("older");
+    expect(await repo.deleteCheckpoint("older")).toEqual({ deleted: true });
+    expect((await repo.getWorkspace()).selectedCheckpointId).toBe(null);
+  });
+
   it("queues rapid successive captures without interleaving", async () => {
     const repo = new Repository(memArea());
     await Promise.all([repo.createCheckpoint(cp("a")), repo.createCheckpoint(cp("b")), repo.createCheckpoint(cp("c"))]);

@@ -17,7 +17,7 @@ Help you resume unfinished work after an interruption without writing a handoff 
 - Notes support mic dictation with the Dictate button in the editor toolbar, using Chrome's free built-in speech recognition. No API key needed. Spoken words are inserted at the cursor and autosave like typed text.
 - Recap card supports **Copy recap** and an observed-facts toggle.
 - Autosaving note tabs, workspace selection, activity history, Google sign-in, and JSON export.
-- Switching browser tabs jumps to that tab's checkpoint. Tabs without a checkpoint are skipped.
+- Switching browser tabs jumps to that tab's checkpoint. Tabs without one show a fresh save prompt instead.
 - Uses a Cloudflare Worker to call the direct Muse API, with authentication, rate limiting, validation, timeouts, and short-lived summary caching.
 
 Notes and checkpoints remain local. Content selected for AI is sent to the backend and the direct Muse API. Validated summaries may be cached at Cloudflare for five minutes; set CACHE_TTL_SECONDS=0 to disable this. Capture and notes work without AI.

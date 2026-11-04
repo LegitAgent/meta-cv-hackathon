@@ -102,12 +102,12 @@ describe("tab following", () => {
     expect(await selectedCheckpoint(records)).toBe("new");
   });
 
-  it("keeps the selection when the tab has no checkpoint", async () => {
+  it("clears the selection when the tab has no checkpoint", async () => {
     const { records } = setup();
     tabUrls = { 9: "https://unrelated.example/page" };
     await loadBackground();
     activated!({ tabId: 9, windowId: 1 });
-    expect(await selectedCheckpoint(records)).toBe("old");
+    expect(await selectedCheckpoint(records)).toBeNull();
   });
 
   it("ignores unreadable tab URLs", async () => {
@@ -124,8 +124,17 @@ describe("tab following", () => {
     tabUrls = { 9: "https://unrelated.example/page" };
     await loadBackground();
     activated!({ tabId: 9, windowId: 1 });
-    expect(await selectedCheckpoint(records)).toBe("old");
+    expect(await selectedCheckpoint(records)).toBeNull();
     expect(records["meta:lastCapture"]).toBeUndefined();
+  });
+
+  it("clears a failed capture banner on navigation even when the tab cannot be read", async () => {
+    const { records } = setup();
+    records["meta:lastCapture"] = { ok: false, at: "2026-01-01T00:00:00.000Z", checkpointId: null, code: "SCRIPT_DENIED", message: "denied" };
+    tabUrls = {};
+    await loadBackground();
+    updated!(99, { status: "complete" });
+    await vi.waitFor(() => expect(records["meta:lastCapture"]).toBeUndefined());
   });
 
   it("keeps a successful capture record when switching tabs", async () => {

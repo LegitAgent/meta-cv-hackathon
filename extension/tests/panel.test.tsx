@@ -264,6 +264,7 @@ it("shows the recap button once signed in", async () => {
     checkpointId: "c", requestId: null, status: "idle", startedAt: null,
     includedNoteSnapshots: [], result: null, error: null, warnings: [],
   };
+  records.workspace = { ...(records.workspace as object), selectedCheckpointId: "c" };
   const sessionStore: Record<string, unknown> = {
     backendCredential: {
       origin: "https://backtrack.martinalba.dev",

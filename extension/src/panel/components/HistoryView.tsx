@@ -123,7 +123,7 @@ export function HistoryView({
     <div>
       <section className="card">
         <h3>Checkpoints</h3>
-        <p className="hint">Switching browser tabs jumps to that tab's checkpoint. Capture a page first to include it.</p>
+        <p className="hint">Switching browser tabs jumps to that tab's checkpoint. Tabs without one show a fresh save prompt, so capture a page first to include it.</p>
         <div className="history-toolbar">
           <input
             value={query}

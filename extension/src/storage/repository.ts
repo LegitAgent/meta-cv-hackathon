@@ -96,7 +96,16 @@ export class Repository {
       // Notes are retained: deleting a checkpoint never deletes linked notes.
       const ws = await this.getWorkspace();
       if (ws.selectedCheckpointId === id) {
-        await this.area.set({ workspace: { ...ws, selectedCheckpointId: null } });
+        // Fall back to the newest remaining checkpoint so an explicit null
+        // selection keeps meaning "the current tab has nothing saved".
+        const all = await this.area.get(null);
+        let newest: Checkpoint | null = null;
+        for (const [key, value] of Object.entries(all)) {
+          if (!key.startsWith("checkpoint:")) continue;
+          const c = value as Checkpoint;
+          if (!newest || c.createdAt > newest.createdAt) newest = c;
+        }
+        await this.area.set({ workspace: { ...ws, selectedCheckpointId: newest?.id ?? null } });
       }
       await this.appendEvent("checkpoint.deleted", id, null).catch(() => undefined);
       return { deleted: true };

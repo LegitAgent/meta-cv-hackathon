@@ -27,7 +27,7 @@ it("copies the recap and flashes green, then fades", async () => {
   const writeText = vi.fn(async (_text: string) => undefined);
   Object.assign(navigator, { clipboard: { writeText } });
   render(<SummaryCard job={job()} />);
-  const button = screen.getByRole("button", { name: "Copy recap" });
+  const button = screen.getByRole("button", { name: "Copy Recap" });
   fireEvent.click(button);
   expect(writeText).toHaveBeenCalledTimes(1);
   expect(writeText.mock.calls[0][0]).toContain("Saved attempt");
@@ -38,13 +38,13 @@ it("copies the recap and flashes green, then fades", async () => {
   act(() => {
     vi.advanceTimersByTime(1600);
   });
-  expect(screen.getByRole("button", { name: "Copy recap" }).className).not.toContain("copied");
+  expect(screen.getByRole("button", { name: "Copy Recap" }).className).not.toContain("copied");
 });
 
 it("surfaces a hint when the clipboard write fails", async () => {
   const writeText = vi.fn(async (_text: string) => { throw new Error("denied"); });
   Object.assign(navigator, { clipboard: { writeText } });
   render(<SummaryCard job={job()} />);
-  fireEvent.click(screen.getByRole("button", { name: "Copy recap" }));
+  fireEvent.click(screen.getByRole("button", { name: "Copy Recap" }));
   expect((await screen.findByRole("alert")).textContent).toContain("Copy failed");
 });

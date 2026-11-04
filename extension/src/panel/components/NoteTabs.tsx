@@ -143,6 +143,7 @@ function NoteEditor({
   const [interim, setInterim] = useState("");
   const [dictateError, setDictateError] = useState<string | null>(null);
   const recognitionRef = useRef<{ stop(): void; abort(): void } | null>(null);
+  const stopIntentRef = useRef(false);
   const insertAtRef = useRef(0);
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -153,6 +154,9 @@ function NoteEditor({
   useEffect(() => {
     return () => {
       try {
+        // Our own abort surfaces as an "aborted" error below; mark the
+        // intent so it is never shown as a microphone problem.
+        stopIntentRef.current = true;
         recognitionRef.current?.abort();
       } catch {
         // Recognition never started; nothing to stop.
@@ -166,6 +170,9 @@ function NoteEditor({
   function toggleDictation() {
     if (listening) {
       try {
+        // Manual stop can still flush a trailing error (e.g. no-speech for
+        // trailing silence); it is not a microphone problem.
+        stopIntentRef.current = true;
         recognitionRef.current?.stop();
       } finally {
         setListening(false);
@@ -177,7 +184,7 @@ function NoteEditor({
       | (new () => {
         lang: string; continuous: boolean; interimResults: boolean;
         onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0?: { transcript?: string } }> }) => void) | null;
-        onerror: (() => void) | null; onend: (() => void) | null;
+        onerror: ((event: { error?: string }) => void) | null; onend: (() => void) | null;
         start(): void; stop(): void; abort(): void;
       })
       | undefined;
@@ -211,12 +218,29 @@ function NoteEditor({
         onDraftChange({ title: draftRef.current.title, body: cur.slice(0, at) + sep + spoken + cur.slice(at) });
       }
     };
-    recog.onerror = () => {
+    recog.onerror = (event) => {
+      const code = typeof event?.error === "string" ? event.error : "";
       setListening(false);
       setInterim("");
-      setDictateError("Dictation stopped: the microphone was denied or unavailable.");
+      // Our own stop/abort and the browser's auto-stop surface as errors;
+      // none of them mean the microphone is broken.
+      if (code === "aborted" || stopIntentRef.current) return;
+      if (code === "not-allowed" || code === "service-not-allowed") {
+        setDictateError("Microphone blocked: allow microphone access for this extension, then try again.");
+      } else if (code === "no-speech") {
+        setDictateError("Didn't catch that — speak and try again.");
+      } else if (code === "audio-capture") {
+        setDictateError("No microphone found, or it is busy in another app.");
+      } else if (code === "network") {
+        setDictateError("Dictation needs a network connection — check yours and retry.");
+      } else if (code === "language-not-supported") {
+        setDictateError("Dictation does not support this browser language.");
+      } else {
+        setDictateError("Dictation stopped unexpectedly — try again.");
+      }
     };
     recog.onend = () => {
+      stopIntentRef.current = false;
       setListening(false);
       setInterim("");
       recognitionRef.current = null;
@@ -268,7 +292,12 @@ function NoteEditor({
         </p>
       )}
       {dictateError && !listening && (
-        <p className="error" role="alert">{dictateError}</p>
+        <p className="error" role="alert">
+          {dictateError}{" "}
+          <button className="link" aria-label="Dismiss dictation error" onClick={() => setDictateError(null)}>
+            Dismiss
+          </button>
+        </p>
       )}
       {preview ? (
         <div className="preview" aria-label="Note preview" dangerouslySetInnerHTML={{ __html: renderPreview(draft.body) }} />

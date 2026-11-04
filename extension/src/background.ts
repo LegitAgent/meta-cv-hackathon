@@ -272,9 +272,20 @@ export function newestCheckpointIdForTask(checkpoints: Checkpoint[], taskKey: st
 }
 
 /** Follow browser tab switches: select the newest checkpoint for the active
- * tab's task so the side panel updates. Keeps the current selection when the
- * tab has no checkpoint (unrelated browsing) or its URL is unreadable. */
+ * tab's task, or clear the selection so an unsaved tab shows a fresh save
+ * prompt. A navigation or tab switch starts a new context: never drag a
+ * stale capture error along. */
+async function clearFailureBanner(): Promise<void> {
+  try {
+    const last = (await chromeArea.get(["meta:lastCapture"]))["meta:lastCapture"] as LastCapture | undefined;
+    if (last && !last.ok) await chromeArea.remove(["meta:lastCapture"]);
+  } catch {
+    // Read-only failure: leave the banner alone.
+  }
+}
+
 async function syncSelectionToTab(tabId: number): Promise<void> {
+  await clearFailureBanner();
   let url = "";
   try {
     url = (await chrome.tabs.get(tabId)).url ?? "";
@@ -293,13 +304,13 @@ async function syncSelectionToTab(tabId: number): Promise<void> {
     const ws = all["workspace"] as Workspace | undefined;
     if (id && ws?.selectedCheckpointId !== id) {
       await repo.updateWorkspace({ selectedCheckpointId: id });
+    } else if (!id && ws?.selectedCheckpointId) {
+      // The current tab has no checkpoint: clear the selection so the panel
+      // shows a fresh save prompt instead of another page's checkpoint.
+      await repo.updateWorkspace({ selectedCheckpointId: null });
     }
-    // A failed capture belonged to the tab you just left: clear its banner so
-    // switching tabs always starts clean instead of dragging the error along.
-    const last = all["meta:lastCapture"] as LastCapture | undefined;
-    if (last && !last.ok) {
-      await chromeArea.remove(["meta:lastCapture"]);
-    }
+    // The failure banner is cleared up front by clearFailureBanner, before
+    // the early returns above, so no tab state can trap it.
   } catch {
     // Read-only failure: keep the current selection.
   }
@@ -473,6 +484,9 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status !== "complete" && info.url === undefined) return;
+  // Any finished navigation starts a new context: drop a stale failure banner
+  // even when the tab cannot be read or is not the active one.
+  void clearFailureBanner();
   // A background tab finishing load must not steal the selection: only sync
   // when the updated tab is the active one.
   void (async () => {
