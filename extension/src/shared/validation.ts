@@ -23,6 +23,7 @@ export const checkpointSchema = z.object({
   selectedText: z.string().max(LIMITS.SELECTED_MAX),
   code: z.string().max(LIMITS.CODE_MAX).nullable(),
   language: z.string().max(64).nullable(),
+  screenshot: z.string().max(LIMITS.SCREENSHOT_MAX).nullable(),
   quality: qualitySchema,
 });
 

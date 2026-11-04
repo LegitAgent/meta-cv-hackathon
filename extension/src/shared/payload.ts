@@ -51,6 +51,7 @@ export function buildSummaryPayload(
         selectedText: checkpoint.selectedText,
         code: codeOverride ? codeOverride.body.slice(0, LIMITS.CODE_MAX) : checkpoint.code,
         language: checkpoint.language,
+        screenshot: checkpoint.screenshot,
         quality: codeOverride ? {
           ...checkpoint.quality,
           warnings: [...checkpoint.quality.warnings, "Code for this recap came from a pasted note and replaces captured code."],

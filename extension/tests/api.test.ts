@@ -13,6 +13,7 @@ function payload(): SummaryRequestPayload {
       selectedText: "",
       code: null,
       language: null,
+      screenshot: null,
       quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
     },
     notes: [],

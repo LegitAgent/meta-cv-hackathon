@@ -195,7 +195,7 @@ export function HistoryView({
                         onChange={(e) => toggle(c.id, e.target.checked)}
                         aria-label={`Select ${c.title}`}
                       />
-                      <button className="link" onClick={() => onSelect(c.id)}>
+                      <button className="link" onClick={() => onSelect(c.id)} title={c.title}>
                         {c.title}
                       </button>
                     </span>

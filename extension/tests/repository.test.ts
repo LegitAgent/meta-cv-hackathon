@@ -34,6 +34,7 @@ function cp(id: string): Checkpoint {
     selectedText: "",
     code: "x=1",
     language: "python",
+    screenshot: null,
     quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
   };
 }

@@ -208,7 +208,7 @@ it("deleting a note drops its pending autosave instead of retrying it", async ()
 const checkpoint: Checkpoint = {
   id: "c", schemaVersion: 1, createdAt: "2026-01-01", taskKey: "task", title: "Task",
   url: "https://example.com", adapter: "generic", pageText: "page", selectedText: "",
-  code: "partial", language: "python", quality: { code: "partial", missingFields: [], truncatedFields: [], warnings: [] },
+  code: "partial", language: "python", screenshot: null, quality: { code: "partial", missingFields: [], truncatedFields: [], warnings: [] },
 };
 
 it("offers full-code paste for a partial capture", () => {

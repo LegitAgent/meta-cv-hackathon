@@ -15,6 +15,7 @@ function cp(): Checkpoint {
     selectedText: "",
     code: null,
     language: null,
+    screenshot: null,
     quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
   };
 }
@@ -39,6 +40,12 @@ describe("summary payload budget", () => {
     ]);
     expect(payload.notes).toEqual([{ id: "n-1", body: "short" }]);
     expect(warnings).toEqual([]);
+  });
+
+  it("passes the screenshot through to the checkpoint payload", () => {
+    const shot = "data:image/jpeg;base64," + "s".repeat(1000);
+    const { payload } = buildSummaryPayload({ ...cp(), screenshot: shot }, "r-3", []);
+    expect(payload.checkpoint.screenshot).toBe(shot);
   });
 
   it("uses selected pasted code as code without spending the note budget", () => {

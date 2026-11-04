@@ -8,7 +8,7 @@ function checkpoint(id: string, title: string, createdAt: string): Checkpoint {
   return {
     id, schemaVersion: 1, createdAt, taskKey: "task", title,
     url: `https://example.com/${id}`, adapter: "generic", pageText: "page", selectedText: "",
-    code: null, language: null, quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
+    code: null, language: null, screenshot: null, quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
   };
 }
 

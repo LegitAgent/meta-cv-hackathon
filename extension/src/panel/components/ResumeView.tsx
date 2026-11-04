@@ -87,6 +87,13 @@ export function ResumeView({
         <span>{checkpoint.adapter}</span>
       </div>
       <QualityBadge checkpoint={checkpoint} />
+      {checkpoint.screenshot && (
+        <img
+          src={checkpoint.screenshot}
+          alt="Screenshot of the captured page"
+          style={{ maxWidth: "100%", borderRadius: 8 }}
+        />
+      )}
       <div className="row">
         <button onClick={onOpenSource}>Reopen source</button>
         {checkpoint.code && <button onClick={onCopyCode}>Copy code</button>}
@@ -118,6 +125,10 @@ export function ResumeView({
           </p>
         </details>
       )}
+      <p className="hint">
+        Saving captures a compressed screenshot of the visible tab alongside the page text. It is sent
+        with the recap request only — avoid saving pages that show passwords or other sensitive content.
+      </p>
       <div className="consent">
         <label>
           <input

@@ -25,6 +25,7 @@ export interface Checkpoint {
   selectedText: string;
   code: string | null;
   language: string | null;
+  screenshot: string | null;
   quality: Quality;
 }
 
@@ -138,6 +139,7 @@ export interface SummaryRequestPayload {
     selectedText: string;
     code: string | null;
     language: string | null;
+    screenshot: string | null;
     quality: Quality;
   };
   notes: { id: string; body: string }[];
@@ -148,6 +150,7 @@ export const LIMITS = {
   CODE_MAX: 30000,
   SELECTED_MAX: 5000,
   NOTES_TOTAL_MAX: 10000,
+  SCREENSHOT_MAX: 120000,
   BODY_BYTES_MAX: 256 * 1024,
 } as const;
 

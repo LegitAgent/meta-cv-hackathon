@@ -5,7 +5,7 @@ function cp(id: string, taskKey: string, createdAt: string): Checkpoint {
   return {
     id, schemaVersion: 1, createdAt, taskKey, title: id,
     url: `https://${taskKey}`, adapter: "generic",
-    pageText: "p", selectedText: "", code: null, language: null,
+    pageText: "p", selectedText: "", code: null, language: null, screenshot: null,
     quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
   };
 }

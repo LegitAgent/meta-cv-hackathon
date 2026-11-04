@@ -18,6 +18,7 @@ import { Repository, type AsyncStorageArea } from "./storage/repository";
 import { ensureDefaults, reconcileOnStartup } from "./storage/migrations";
 import { buildGenericOutcome, extractGenericInPage } from "./capture/generic";
 import { buildLeetCodeOutcome, extractLeetCodeProblemInPage, isLeetCodeProblemUrl } from "./capture/leetcode";
+import { captureScreenshot } from "./capture/screenshot";
 
 const chromeArea: AsyncStorageArea = {
   get: (keys) =>
@@ -201,6 +202,20 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
     return fail("NAVIGATION_RACE", "The tab navigated during capture. The mixed snapshot was discarded; capture again.");
   }
 
+  // Optional visual supplement: a compressed screenshot of the visible tab.
+  // Text extraction above stays the source of truth; a missing screenshot
+  // never fails the capture.
+  const screenshot = await captureScreenshot(tabId);
+  if (!screenshot) {
+    outcome = {
+      ...outcome,
+      quality: {
+        ...outcome.quality,
+        warnings: [...outcome.quality.warnings, "Screenshot unavailable; this recap uses text only."],
+      },
+    };
+  }
+
   const url = cleanUrl(capturedUrl);
   const cp: Checkpoint = {
     id: newId(),
@@ -214,6 +229,7 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
     selectedText: outcome.selectedText,
     code: outcome.code,
     language: outcome.language,
+    screenshot,
     quality: outcome.quality,
   };
   try {
