@@ -92,6 +92,19 @@ describe("Worker gateway", () => {
     expect(response.status).toBe(200);
     expect(t.fetcher).toHaveBeenCalledTimes(1);
   });
+  it("sends the screenshot as an image part alongside the text", async () => {
+    const t = setup();
+    const shot = `data:image/jpeg;base64,${"a".repeat(1000)}`;
+    const body = { ...input(), checkpoint: { ...input().checkpoint, screenshot: shot } };
+    const response = await t.send(body);
+    expect(response.status).toBe(200);
+    const sent = JSON.parse(t.fetcher.mock.calls[0][1].body);
+    expect(sent.messages[1].content).toEqual([
+      { type: "text", text: expect.any(String) },
+      { type: "image_url", image_url: { url: shot } },
+    ]);
+    expect(sent.messages[1].content[0].text).not.toContain("data:image");
+  });
   it("fails closed when auth is not configured", async () => {
     const t = setup(); t.env.GOOGLE_CLIENT_ID = "";
     expect((await t.send()).status).toBe(503); expect(t.fetcher).not.toHaveBeenCalled();
@@ -166,6 +179,12 @@ describe("Worker gateway", () => {
     t.fetcher.mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ recap: "", nextAction: "" }) } }] })));
     expect((await t.send()).status).toBe(502);
     expect(t.cache.put).not.toHaveBeenCalled();
+  });
+  it("tells the model what to say when there is nothing to recap", async () => {
+    const t = setup();
+    expect((await t.send()).status).toBe(200);
+    const body = JSON.parse(t.fetcher.mock.calls[0][1].body);
+    expect(body.messages[0].content).toContain("didn't add anything");
   });
   it("can disable caching", async () => {
     const t = setup(); t.env.CACHE_TTL_SECONDS = "0";

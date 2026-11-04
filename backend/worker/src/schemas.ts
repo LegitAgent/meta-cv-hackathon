@@ -8,6 +8,7 @@ export const requestSchema = z.object({
     pageText: z.string().max(20000), selectedText: z.string().max(5000).default(""),
     code: z.string().max(30000).nullable().default(null),
     language: z.string().max(64).nullable().default(null),
+    screenshot: z.string().max(120000).nullable().default(null),
     quality: z.object({
       code: z.enum(["complete", "partial", "unavailable"]),
       missingFields: boundedList, truncatedFields: boundedList, warnings: boundedList,
