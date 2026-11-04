@@ -125,6 +125,96 @@ function NoteEditor({
 }) {
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   const [preview, setPreview] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => {
+    setConfirmingDelete(false);
+  }, [note.id]);
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState("");
+  const recognitionRef = useRef<{ stop(): void; abort(): void } | null>(null);
+  const insertAtRef = useRef(0);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const recognitionWindow = typeof window !== "undefined"
+    ? (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown })
+    : {};
+  const recognitionSupported = Boolean(recognitionWindow.SpeechRecognition || recognitionWindow.webkitSpeechRecognition);
+  useEffect(() => {
+    return () => {
+      try {
+        recognitionRef.current?.abort();
+      } catch {
+        // Recognition never started; nothing to stop.
+      }
+      recognitionRef.current = null;
+    };
+  }, [note.id]);
+  function toggleDictation() {
+    if (listening) {
+      try {
+        recognitionRef.current?.stop();
+      } finally {
+        setListening(false);
+        setInterim("");
+      }
+      return;
+    }
+    const Ctor = (recognitionWindow.SpeechRecognition || recognitionWindow.webkitSpeechRecognition) as
+      | (new () => {
+        lang: string; continuous: boolean; interimResults: boolean;
+        onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0?: { transcript?: string } }> }) => void) | null;
+        onerror: (() => void) | null; onend: (() => void) | null;
+        start(): void; stop(): void; abort(): void;
+      })
+      | undefined;
+    if (!Ctor) return;
+    const recog = new Ctor();
+    recog.lang = typeof navigator !== "undefined" && navigator.language ? navigator.language : "en-US";
+    recog.continuous = true;
+    recog.interimResults = true;
+    const el = bodyRef.current;
+    // Insert at the caret only when the field actually has focus; otherwise
+    // append at the end instead of surprising the user at position zero.
+    const focused = typeof document !== "undefined" && !!el && document.activeElement === el;
+    insertAtRef.current = focused && el?.selectionStart != null ? el.selectionStart : draftRef.current.body.length;
+    let offset = 0;
+    recog.onresult = (event) => {
+      let finalText = "";
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const text = result[0]?.transcript ?? "";
+        if (result.isFinal) finalText += text;
+        else interimText += text;
+      }
+      setInterim(interimText);
+      if (finalText.trim()) {
+        const cur = draftRef.current.body;
+        const at = Math.min(insertAtRef.current + offset, cur.length);
+        const sep = at > 0 && !/\s$/.test(cur.slice(0, at)) ? " " : "";
+        const spoken = finalText.trim();
+        offset += (sep + spoken).length;
+        onDraftChange({ title: draftRef.current.title, body: cur.slice(0, at) + sep + spoken + cur.slice(at) });
+      }
+    };
+    recog.onerror = () => {
+      setListening(false);
+      setInterim("");
+    };
+    recog.onend = () => {
+      setListening(false);
+      setInterim("");
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recog;
+    try {
+      recog.start();
+      setListening(true);
+    } catch {
+      recognitionRef.current = null;
+      setListening(false);
+    }
+  }
   function applyFormat(format: (body: string, sel: { start: number; end: number }) => { body: string; selection: { start: number; end: number } }) {
     const el = bodyRef.current;
     const start = el?.selectionStart ?? draft.body.length;
@@ -152,7 +242,15 @@ function NoteEditor({
         <button className="link" title="Italic" aria-label="Italic" onClick={() => applyFormat((body, sel) => wrapInline(body, sel, "*"))}><em>I</em></button>
         <button className="link" title="Bulleted list" aria-label="Bulleted list" onClick={() => applyFormat(toggleBullets)}>List</button>
         <button className="link" aria-pressed={preview} onClick={() => setPreview((v) => !v)}>{preview ? "Edit" : "Preview"}</button>
+        {recognitionSupported && (listening
+          ? <button className="link" aria-label="Stop dictation" onClick={toggleDictation}>Stop</button>
+          : <button className="link" aria-label="Dictate note" onClick={toggleDictation}>Dictate</button>)}
       </div>
+      {listening && (
+        <p className="hint" role="status">
+          Listening… press Stop when done.{interim ? ` Heard: ${interim}` : ""}
+        </p>
+      )}
       {preview ? (
         <div className="preview" aria-label="Note preview" dangerouslySetInnerHTML={{ __html: renderPreview(draft.body) }} />
       ) : (
@@ -168,14 +266,21 @@ function NoteEditor({
         <span className="save-state" data-state={saveState}>
           {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving…" : saveState === "conflict" ? "Conflict" : "Save error"}
         </span>
-        <button
-          className="link danger"
-          onClick={() => {
-            if (window.confirm(`Delete note “${note.title}”? This is a separate confirmed action.`)) onDelete(note.id);
-          }}
-        >
-          Delete note
-        </button>
+        {confirmingDelete ? (
+          <span className="history-confirm" role="alert">
+            <span>Delete “{note.title}”? This cannot be undone.</span>
+            <span className="row">
+              <button className="danger" onClick={() => onDelete(note.id)}>
+                Delete
+              </button>
+              <button onClick={() => setConfirmingDelete(false)}>Keep</button>
+            </span>
+          </span>
+        ) : (
+          <button className="link danger" onClick={() => setConfirmingDelete(true)}>
+            Delete note
+          </button>
+        )}
       </div>
     </div>
   );
@@ -194,6 +299,7 @@ export function SavedNotes({
 }) {
   const closed = notes.filter((n) => !openNoteIds.includes(n.id));
   const [q, setQ] = useState("");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [sort, setSort] = useState<"updated" | "created" | "title">("updated");
   const filtered = closed
     .filter((n) => n.title.toLowerCase().includes(q.toLowerCase()))
@@ -219,14 +325,27 @@ export function SavedNotes({
             <button className="link" onClick={() => onSelect(n.id)}>
               {n.title}
             </button>
-            <button
-              className="link danger"
-              onClick={() => {
-                if (window.confirm(`Delete note “${n.title}”?`)) onDelete(n.id);
-              }}
-            >
-              Delete
-            </button>
+            {confirmId === n.id ? (
+              <span className="history-confirm" role="alert">
+                <span>Delete “{n.title}”?</span>
+                <span className="row">
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      onDelete(n.id);
+                      setConfirmId(null);
+                    }}
+                  >
+                    Delete
+                  </button>
+                  <button onClick={() => setConfirmId(null)}>Keep</button>
+                </span>
+              </span>
+            ) : (
+              <button className="link danger" onClick={() => setConfirmId(n.id)}>
+                Delete
+              </button>
+            )}
           </li>
         ))}
       </ul>

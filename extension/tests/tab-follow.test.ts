@@ -117,6 +117,26 @@ describe("tab following", () => {
     expect(await selectedCheckpoint(records)).toBe("old");
   });
 
+  it("clears a failed capture banner when switching tabs", async () => {
+    const { records } = setup();
+    records["meta:lastCapture"] = { ok: false, at: "2026-01-01T00:00:00.000Z", checkpointId: null, code: "SCRIPT_DENIED", message: "denied" };
+    tabUrls = { 9: "https://unrelated.example/page" };
+    await loadBackground();
+    activated!({ tabId: 9, windowId: 1 });
+    expect(await selectedCheckpoint(records)).toBe("old");
+    expect(records["meta:lastCapture"]).toBeUndefined();
+  });
+
+  it("keeps a successful capture record when switching tabs", async () => {
+    const { records } = setup();
+    records["meta:lastCapture"] = { ok: true, at: "2026-01-01T00:00:00.000Z", checkpointId: "new", code: null, message: null };
+    tabUrls = { 7: "https://example.com/task" };
+    await loadBackground();
+    activated!({ tabId: 7, windowId: 1 });
+    expect(await selectedCheckpoint(records)).toBe("new");
+    expect(records["meta:lastCapture"]).toBeDefined();
+  });
+
   it("follows same-tab navigations on completion", async () => {
     const { records } = setup();
     tabUrls = { 7: "https://example.com/task" };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Checkpoint, SummaryJob } from "../../shared/contracts";
 
 function RetryCountdown({ readyAt }: { readyAt: number }) {
@@ -36,14 +36,25 @@ export function QualityBadge({ checkpoint }: { checkpoint: Checkpoint }) {
   );
 }
 
+/** Newest same-task checkpoints excluding the selected one. */
+export function getResumeStack(all: Checkpoint[], selected: Checkpoint | null, limit = 3): Checkpoint[] {
+  if (!selected) return [];
+  return all
+    .filter((c) => c.id !== selected.id && c.taskKey === selected.taskKey)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    .slice(0, limit);
+}
+
 export function ResumeView({
   checkpoint,
   job,
+  related,
   onCapture,
   capturing,
   onSummarize,
   onCopyCode,
   onOpenSource,
+  onOpenCheckpoint,
   busy,
   autoSummarize,
   onAutoSummarize,
@@ -52,11 +63,13 @@ export function ResumeView({
 }: {
   checkpoint: Checkpoint | null;
   job: SummaryJob | null;
+  related: Checkpoint[];
   onCapture: () => void;
   capturing: boolean;
   onSummarize: () => void;
   onCopyCode: () => void;
   onOpenSource: () => void;
+  onOpenCheckpoint: (c: Checkpoint) => void;
   busy: boolean;
   autoSummarize: boolean;
   onAutoSummarize: (v: boolean) => void;
@@ -98,6 +111,22 @@ export function ResumeView({
         <button onClick={onOpenSource}>Reopen source</button>
         {checkpoint.code && <button onClick={onCopyCode}>Copy code</button>}
       </div>
+      {related.length > 0 && (
+        <div className="resume-stack">
+          <h3>Back to where I was</h3>
+          <p className="hint">Other saves from this same task. Reopening never changes saved code.</p>
+          <ul>
+            {related.map((c) => (
+              <li key={c.id}>
+                <button className="link" onClick={() => onOpenCheckpoint(c)} title={c.url}>
+                  {c.title}
+                </button>
+                <span className="meta"> · {fmtTime(c.createdAt)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {checkpoint.code && (
         <pre className="code">{checkpoint.code.slice(0, 4000)}</pre>
       )}
@@ -167,29 +196,47 @@ export function ResumeView({
 
 export function SummaryCard({ job }: { job: SummaryJob | null }) {
   const [showFacts, setShowFacts] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    };
+  }, []);
   if (!job?.result) return null;
   const s = job.result;
+  function copyRecap() {
+    void navigator.clipboard
+      .writeText(
+        [
+          s.recap,
+          `Next action: ${s.nextAction}`,
+          s.possibleBlocker ? `Possible blocker: ${s.possibleBlocker}` : null,
+        ]
+          .filter((line): line is string => line !== null)
+          .join("\n\n"),
+      )
+      .then(() => {
+        setCopied(true);
+        if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+        copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
+      })
+      .catch(() => undefined);
+  }
   return (
     <section className="card summary">
       <h3>Recap</h3>
       <p>{s.recap}</p>
       <button
-        className="link"
-        onClick={() =>
-          void navigator.clipboard
-            .writeText(
-              [
-                s.recap,
-                `Next action: ${s.nextAction}`,
-                s.possibleBlocker ? `Possible blocker: ${s.possibleBlocker}` : null,
-              ]
-                .filter((line): line is string => line !== null)
-                .join("\n\n"),
-            )
-            .catch(() => undefined)
-        }
+        className={`icon-button${copied ? " copied" : ""}`}
+        onClick={copyRecap}
+        aria-label={copied ? "Copied" : "Copy recap"}
+        title={copied ? "Copied!" : "Copy recap"}
       >
-        Copy recap
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <rect x="5" y="5" width="9" height="9" rx="2" />
+          <path d="M11 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h1" />
+        </svg>
       </button>
       <button className="link" onClick={() => setShowFacts((v) => !v)}>
         {showFacts ? "Hide observed facts" : `Show observed facts (${s.observedFacts.length})`}

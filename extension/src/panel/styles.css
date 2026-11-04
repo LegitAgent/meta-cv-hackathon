@@ -172,6 +172,32 @@ button.link {
   font-weight: 600;
 }
 
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  transition: color 0.6s ease, border-color 0.6s ease, background-color 0.6s ease;
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.icon-button.copied {
+  color: var(--green);
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-button {
+    transition: none;
+  }
+}
+
 button.danger {
   color: var(--danger);
   border-color: var(--danger);
@@ -522,6 +548,73 @@ details.paste-box {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.wiki-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 12px;
+  z-index: 50;
+}
+
+.wiki-dialog {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  max-width: 560px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wiki-dialog h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.wiki-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.wiki-body h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.wiki-body p {
+  margin: 0;
+}
+
+.wiki-body dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+
+.wiki-body dt {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wiki-body dd {
+  margin: 0;
+  color: var(--muted);
 }
 
 /* Wider panels: roomier cards, two-column history rows. */

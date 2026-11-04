@@ -273,10 +273,16 @@ async function syncSelectionToTab(tabId: number): Promise<void> {
       .filter(([key]) => key.startsWith("checkpoint:"))
       .map(([, value]) => value as Checkpoint);
     const id = newestCheckpointIdForTask(checkpoints, taskKey);
-    if (!id) return;
     const ws = all["workspace"] as Workspace | undefined;
-    if (ws?.selectedCheckpointId === id) return;
-    await repo.updateWorkspace({ selectedCheckpointId: id });
+    if (id && ws?.selectedCheckpointId !== id) {
+      await repo.updateWorkspace({ selectedCheckpointId: id });
+    }
+    // A failed capture belonged to the tab you just left: clear its banner so
+    // switching tabs always starts clean instead of dragging the error along.
+    const last = all["meta:lastCapture"] as LastCapture | undefined;
+    if (last && !last.ok) {
+      await chromeArea.remove(["meta:lastCapture"]);
+    }
   } catch {
     // Read-only failure: keep the current selection.
   }
@@ -346,6 +352,10 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
     case "CHECKPOINT_DELETE": {
       const r = await repo.deleteCheckpoint(cmd.id);
       return r.deleted ? ok({ deleted: true }) : fail("NOT_FOUND", "Checkpoint no longer exists.");
+    }
+    case "CHECKPOINT_RESUMED": {
+      const recorded = await repo.recordResume(cmd.id);
+      return recorded ? ok({ recorded: true }) : fail("NOT_FOUND", "Checkpoint no longer exists.");
     }
   }
 }

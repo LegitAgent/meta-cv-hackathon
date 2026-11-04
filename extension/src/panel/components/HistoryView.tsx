@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ActivityEvent, Checkpoint, QualityCode, SummaryJob, SummaryStatus } from "../../shared/contracts";
+import { diffCheckpoints } from "../../shared/diff";
 
 function fmtTime(iso: string): string {
   try {
@@ -46,6 +47,31 @@ export function HistoryView({
   const [checked, setChecked] = useState<string[]>([]);
   const [confirmOne, setConfirmOne] = useState<string | null>(null);
   const [confirmMany, setConfirmMany] = useState(false);
+  const [compareId, setCompareId] = useState<string | null>(null);
+
+  // Chronological predecessor within the same task, regardless of sort/filter.
+  const prevById = useMemo(() => {
+    const byTask = new Map<string, Checkpoint[]>();
+    for (const c of checkpoints) {
+      const list = byTask.get(c.taskKey);
+      if (list) list.push(c);
+      else byTask.set(c.taskKey, [c]);
+    }
+    const prev = new Map<string, Checkpoint>();
+    for (const list of byTask.values()) {
+      list.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      for (let i = 1; i < list.length; i++) prev.set(list[i].id, list[i - 1]);
+    }
+    return prev;
+  }, [checkpoints]);
+
+  const compareDiff = useMemo(() => {
+    if (!compareId) return null;
+    const cur = checkpoints.find((c) => c.id === compareId);
+    const prev = cur ? prevById.get(cur.id) : undefined;
+    if (!cur || !prev) return null;
+    return { prev, diff: diffCheckpoints(prev, cur) };
+  }, [compareId, checkpoints, prevById]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -202,6 +228,30 @@ export function HistoryView({
                     <span className="meta">
                       {fmtTime(c.createdAt)} · {c.quality.code} · {summaryLabel(job?.status)}
                     </span>
+                    {compareId === c.id && compareDiff && (
+                      <div className="diff" role="note">
+                        <div className="meta">
+                          vs “{compareDiff.prev.title}”: {compareDiff.diff.summary}
+                        </div>
+                        {compareDiff.diff.changedLines.length > 0 && (
+                          <ul className="diff-lines">
+                            {compareDiff.diff.changedLines.map((l, i) => (
+                              <li key={i} data-change={l.type}>
+                                {l.type === "add" ? "+ " : "- "}
+                                {l.text}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {compareDiff.diff.codeAdded + compareDiff.diff.codeRemoved >
+                          compareDiff.diff.changedLines.length && (
+                          <div className="meta">
+                            Showing {compareDiff.diff.changedLines.length} of{" "}
+                            {compareDiff.diff.codeAdded + compareDiff.diff.codeRemoved} changed lines.
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {confirmOne === c.id ? (
                       <span className="history-confirm" role="alert">
                         <span>Delete “{c.title}”? Notes kept.</span>
@@ -214,6 +264,14 @@ export function HistoryView({
                       </span>
                     ) : (
                       <span className="row">
+                        {prevById.has(c.id) && (
+                          <button
+                            className="link"
+                            onClick={() => setCompareId(compareId === c.id ? null : c.id)}
+                          >
+                            {compareId === c.id ? "Hide diff" : "Compare with previous"}
+                          </button>
+                        )}
                         {job?.status === "failed" && (
                           <button className="link" onClick={() => onRetry(c.id)} disabled={!aiEnabled} title={!aiEnabled ? "Enable AI in Resume to retry" : undefined}>
                             Retry

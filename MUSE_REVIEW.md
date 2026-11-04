@@ -150,3 +150,38 @@ Not bugs (checked, OK): `.dev.vars` and `.npm-cache/` are properly gitignored; `
 - **Worker as single writer with an in-memory op queue**: appropriate for `chrome.storage.local`'s lack of transactions. Note the queue does not survive worker restart — the 60s stale-pending reconciler covers that; keep both.
 - **Gmail-only + short-lived session tokens**: defensible for a hackathon; the `@gmail.com` restriction is a product decision, not a bug, but keep it visible pre-sign-in (the Account card does; the panel gate does).
 - **Edge cache keyed by credential-digest + model + prompt + content, 5-min TTL**: sensible cost saver. Cache hits still count against `TOKEN_LIMITER` (limit check runs before cache lookup) — intentional or not, document it: currently a cached recap still spends rate-limit budget.
+
+---
+
+# Muse Spark review — 2026-11-05 (session changes, working tree)
+
+Scope: HistoryView overhaul, WikiHelp popup, empty-recap prompt rule, mic dictation (replacing read-aloud), copy-recap icon button, README updates, SPEC/TECHNICAL_SPEC updates. No storage-contract or worker-command changes.
+
+## Changes
+
+### H1 — History filter, sort, and inline trash — NEW
+Files: `extension/src/panel/components/HistoryView.tsx`, `extension/src/panel/App.tsx` (`onDeleteMany`), `extension/src/panel/styles.css`.
+Text search over title/URL, quality and summary filters, newest/oldest/title sort, per-row checkboxes, per-row Trash with inline Delete/Keep confirm, bulk Trash-selected with count confirm. No `window.confirm`. Bulk path reuses CHECKPOINT_DELETE per id, then refreshes once. Covered by `extension/tests/history-view.test.tsx` (filter, sort, single and bulk delete).
+
+### W1 — Mini wiki popup — NEW
+Files: `extension/src/panel/components/WikiHelp.tsx`, `App.tsx` (nav Wiki button), `styles.css`. Overlay dialog with Escape/backdrop close and the capture-quality table; body has a marked slot for future sections.
+
+### R7 — Empty-input recap wording — NEW
+File: `backend/worker/src/index.ts` (PROMPT). When inputs are empty, the model must return the explicit nothing-to-recap recap, empty facts, null blocker, a capture-or-tick next action, and an uncertainty naming the missing inputs — instead of inventing work. Covered by a new `worker.test.ts` case asserting the system prompt carries that wording.
+
+### D1 — Mic dictation, not read-aloud — NEW (replaces same-session TTS)
+File: `extension/src/panel/components/NoteTabs.tsx`. The read-aloud Play/Stop (`speechSynthesis`) added earlier this session was removed per user correction. The editor now has a Dictate button using built-in `SpeechRecognition`/`webkitSpeechRecognition` (no API key, demo-appropriate); finals insert at the cursor and autosave, interim shows in a Listening hint, recognition aborts on note switch/unmount. Covered by `extension/tests/note-dictation.test.tsx`; `note-tts.test.tsx` removed.
+
+### C1 — Copy-recap icon button — NEW
+Files: `extension/src/panel/components/ResumeView.tsx` (`SummaryCard`), `styles.css`. Text link replaced with a copy SVG icon button; successful copy flashes green (`.copied`, 1.6s fade, `prefers-reduced-motion` disables the transition). Covered by `extension/tests/copy-recap.test.tsx`.
+
+## Validation this session
+- Extension `tsc --noEmit`: clean after every change.
+- Backend `worker.test.ts`: 27/27 pass, including the new empty-recap case.
+- Extension vitest: last full run 87 passed across 13 files (after H1/W1, before D1/C1). The vitest runner cannot start under this session's default sandbox (esbuild directory reads blocked) and elevated approval was declined, so `history-view` (re-run), `note-dictation`, and `copy-recap` tests are written but unrun here. Run `npm test` in `extension/` to confirm.
+- Existing `panel.test.tsx` unaffected by D1/C1: the Dictate button renders only when recognition exists (absent in jsdom), and no existing test queries the old copy link.
+
+## Docs
+- `README.md` (root) and `extension/README.md`: updated for in-panel capture, History controls, global notes, paste-code override, summary states, empty-recap wording, dictation, Wiki popup, and test inventory.
+- `SPEC.md`: in-panel capture step, global-notes + dictation bullets, History/Wiki interface rows, Resume description, empty-input AI rule, repository status.
+- `TECHNICAL_SPEC.md`: status, file inventory, capture step, bulk-delete note, empty-recap prompt rule, validation plan, completion gate.

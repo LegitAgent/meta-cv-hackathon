@@ -188,21 +188,26 @@ it("filters the recap note list and bulk-selects only the visible notes", async 
 });
 
 it("deleting a note drops its pending autosave instead of retrying it", async () => {
-  const prevConfirm = window.confirm;
-  window.confirm = () => true;
-  try {
-    const { records, updateSent } = setup({ signedIn: true });
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Note body" }), { target: { value: "doomed draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Delete note" }));
-    await waitFor(() => expect(records["note:a"]).toBeUndefined());
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
-    expect(updateSent).not.toHaveBeenCalled();
-    expect(screen.queryByRole("textbox", { name: "Note body" })).toBeNull();
-  } finally {
-    window.confirm = prevConfirm;
-  }
+  const { records, updateSent } = setup({ signedIn: true });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Note body" }), { target: { value: "doomed draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Delete note" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(records["note:a"]).toBeUndefined());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+  expect(updateSent).not.toHaveBeenCalled();
+  expect(screen.queryByRole("textbox", { name: "Note body" })).toBeNull();
+});
+
+it("keeping a note delete confirmation leaves the note alone", async () => {
+  const { records } = setup({ signedIn: true });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete note" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Keep" }));
+  expect(records["note:a"]).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Delete note" })).not.toBeNull();
 });
 
 const checkpoint: Checkpoint = {
@@ -225,6 +230,16 @@ it("shows only the sign-in page until signed in", async () => {
   expect(await screen.findByText("Leave your work. Keep your place.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Sign in with Google" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Notes" })).toBeNull();
+});
+
+it("opens the guide and closes it again", async () => {
+  setup({ signedIn: true });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Wiki" }));
+  expect(await screen.findByText("Backtrack guide")).toBeTruthy();
+  expect(screen.getByText("Attach pasted code")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Close guide" }));
+  await waitFor(() => expect(screen.queryByText("Backtrack guide")).toBeNull());
 });
 
 it("shows the recap button once signed in", async () => {

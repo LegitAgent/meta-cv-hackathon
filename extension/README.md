@@ -11,7 +11,7 @@ MV3 side-panel extension per `TECHNICAL_SPEC.md` sections 1–8, 11–13.
 - `src/storage/` — `repository.ts` (queue + revision conflicts + summary jobs) + `migrations.ts` (startup reconciliation, activity pruning)
 - `src/shared/` — `contracts.ts` (storage keys `meta`/`workspace`/`checkpoint:`/`summary:`/`note:`/`event:`) + `validation.ts` (Zod boundaries) + `payload.ts` (note budget and `codeOverride` handling) + `config.ts`
 - `src/panel/` — React app (`main.tsx`, `App.tsx`, `api.ts` with 45s AbortController and `Retry-After` forwarding, `auth.ts`, `store.ts`, `styles.css`)
-- `src/panel/components/` — `ResumeView.tsx` (in-panel capture, quality badge, paste-code fallback, recap, copy recap, retry countdown), `NoteTabs.tsx`, `HistoryView.tsx` (search, quality/summary filters, newest/oldest/title sort, checkbox selection, inline single and bulk trash confirm), `AccountSettings.tsx`, `SignInPage.tsx`, `WikiHelp.tsx` (mini quality-code popup)
+- `src/panel/components/` — `ResumeView.tsx` (in-panel capture, quality badge, paste-code fallback, recap, copy recap, retry countdown), `NoteTabs.tsx` (editor formatting, preview, mic dictation via built-in speech recognition), `HistoryView.tsx` (search, quality/summary filters, newest/oldest/title sort, checkbox selection, inline single and bulk trash confirm), `AccountSettings.tsx`, `SignInPage.tsx`, `WikiHelp.tsx` (mini quality-code popup)
 - `tests/` — Vitest suites plus adapter fixtures, including `history-view.test.tsx` and `panel.test.tsx`
 
 ## Panel views

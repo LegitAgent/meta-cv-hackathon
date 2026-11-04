@@ -123,6 +123,7 @@ export type WorkerCommand =
   | { type: "SUMMARY_COMPLETE"; checkpointId: string; requestId: string; result: Summary }
   | { type: "SUMMARY_FAIL"; checkpointId: string; requestId: string; error: { code: string; message: string } }
   | { type: "CHECKPOINT_DELETE"; id: string }
+  | { type: "CHECKPOINT_RESUMED"; id: string }
   | { type: "CAPTURE" };
 
 export type WorkerResponse =

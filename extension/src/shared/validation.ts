@@ -116,6 +116,7 @@ export const workerCommandSchema = z.discriminatedUnion("type", [
     error: z.object({ code: z.string().max(64), message: z.string().max(1000), retryAfterSeconds: z.number().int().nonnegative().optional() }),
   }),
   z.object({ type: z.literal("CHECKPOINT_DELETE"), id: z.string().min(1) }),
+  z.object({ type: z.literal("CHECKPOINT_RESUMED"), id: z.string().min(1) }),
   z.object({ type: z.literal("CAPTURE") }),
 ]);
 

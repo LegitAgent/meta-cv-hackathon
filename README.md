@@ -13,7 +13,8 @@ Help you resume unfinished work after an interruption without writing a handoff 
 - History has text search, quality and summary filters, newest/oldest/title sort, per-row **Trash** with inline `Delete` / `Keep`, and bulk **Trash selected** with an inline count confirm. No native `confirm()` dialogs. Deleting a checkpoint keeps linked notes.
 - Notes are global, not per-page. `linkedCheckpointId` is optional metadata; linking does not auto-include a note. Tick notes under **Notes to include** to send them.
 - Missing or partial code offers a paste-code fallback. Pasted code is saved as a linked `codeOverride` note and replaces captured code for the next recap only; the checkpoint stays immutable.
-- Summary states are `idle`, `pending`, `complete`, and `failed`. Failed recaps show the error, recap warnings, retry, and a 429 countdown when the backend sends `Retry-After`.
+- Summary states are `idle`, `pending`, `complete`, and `failed`. Failed recaps show the error, recap warnings, retry, and a 429 countdown when the backend sends `Retry-After`. Empty captures get an honest recap saying you didn't add anything to recap, plus what to add next.
+- Notes support mic dictation with the Dictate button in the editor toolbar, using Chrome's free built-in speech recognition. No API key needed. Spoken words are inserted at the cursor and autosave like typed text.
 - Recap card supports **Copy recap** and an observed-facts toggle.
 - Autosaving note tabs, workspace selection, activity history, Google sign-in, and JSON export.
 - Switching browser tabs jumps to that tab's checkpoint. Tabs without a checkpoint are skipped.

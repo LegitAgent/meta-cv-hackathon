@@ -292,6 +292,16 @@ export class Repository {
     });
   }
 
+  /** Record a resume: one append-only event, no checkpoint mutation. */
+  recordResume(id: string): Promise<boolean> {
+    return this.enqueue(async () => {
+      const got = await this.area.get([keyCheckpoint(id)]);
+      if (!got[keyCheckpoint(id)]) return false;
+      await this.appendEvent("checkpoint.resumed", id, null).catch(() => undefined);
+      return true;
+    });
+  }
+
   // ---- meta + events ----
 
   async getMeta(): Promise<Meta | null> {

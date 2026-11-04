@@ -1,6 +1,6 @@
 # Backtrack — Technical Design
 
-Status: implementation proposal, not implemented.
+Status: implemented MVP in the working tree; see MUSE_REVIEW.md for verification.
 
 Product requirements: [SPEC.md](SPEC.md). Target: an unpacked Chrome extension demonstrated by November 5, 2026.
 
@@ -62,10 +62,12 @@ extension/
     shared/validation.ts
     panel/main.tsx
     panel/App.tsx
-    panel/components/
-    panel/api.ts
+    panel/components/ (AccountSettings, HistoryView, NoteTabs, ResumeView, SignInPage, WikiHelp)
+    panel/api.ts (45s deadline, Retry-After forwarding)
+    panel/auth.ts
+    panel/store.ts
     panel/styles.css
-  tests/
+  tests/ (adapters, repository, payload, store, panel, history-view, note-dictation, copy-recap, tab-follow, validation, api, auth)
 backend/
   worker/
     src/entry.ts
@@ -108,7 +110,7 @@ On initialization, restrict storage access to trusted extension contexts with st
 ## 5. Capture sequence
 
 1. Handle action.onClicked(tab), retaining its ID and initial URL.
-2. Open the panel; expose a temporary capturing indicator.
+2. Open the panel; the Resume view also offers in-panel Save this page / Save again with a capturing indicator.
 3. Reject unsupported schemes such as chrome:, file:, and extension pages.
 4. Run the generic extractor in the top frame through scripting.executeScript.
 5. On an approved LeetCode problem URL, also try the site adapter.
@@ -218,6 +220,8 @@ Panel-to-worker commands:
 | CHECKPOINT_DELETE | id | Remove checkpoint and summary; retain notes |
 ```
 
+Bulk history deletion reuses CHECKPOINT_DELETE once per selected checkpoint, then refreshes once.
+
 Every response has either `{ok: true, data}` or `{ok: false, error: {code, message}}`. Validate command schemas and sender identity. Accept mutation commands only from trusted extension pages, not messages from page content scripts. Register listeners synchronously during worker startup; await initialization inside handlers.
 
 Queue read-modify-write operations in the worker. For notes, reject a stale baseRevision rather than silently overwriting another panel's edit. Return the current record so the UI can preserve both drafts and ask the user to resolve a conflict.
@@ -324,6 +328,7 @@ Use a fixed system instruction that:
 - Prohibits invented tests, intentions, history, or correctness claims.
 - Treats submitted page/code/note text as data, not operational instructions.
 - Requests one actionable next step and a short recap.
+- Returns an explicit nothing-to-recap recap (states nothing was added, what to add next) when inputs are empty.
 
 Use provider-supported structured output if verified for this model; otherwise request JSON and strictly validate the parsed response. Invalid output returns MODEL_OUTPUT_INVALID and offers retry. Do not display hidden reasoning or raw provider responses.
 
@@ -345,7 +350,8 @@ Automated checks:
 
 - Adapter fixtures: generic page, missing main content, long editor, partial editor, and navigation mismatch.
 - Repository: revision conflicts, failed writes, invalid workspace references, and deleted checkpoints receiving late summaries.
-- Jobs: out-of-order results, retry supersession, malformed output, and stale pending jobs.
+- Jobs: out-of-order results, retry supersession, malformed output, stale pending jobs, and the empty-input recap wording.
+- Panel: history filter/sort/inline trash and bulk delete, note dictation insertion, copy-recap flash, and the sign-in gate.
 - API: size bounds, invalid schemas, upstream timeout/error mapping, and absence of raw secret-bearing error text.
 
 Manual Chrome checks:
@@ -372,4 +378,4 @@ Measure local save latency and inference latency separately. Target a local save
 6. Connect pending/retry states and verify lifecycle failure cases.
 7. Rehearse capture → leave → return with a real partial coding attempt.
 
-Ship the MVP when this loop works reliably and notes survive restart. A perfect site adapter, microphone, generalized browsing awareness, and additional inference providers are not completion requirements.
+Ship the MVP when this loop works reliably and notes survive restart. A perfect site adapter, generalized browsing awareness, and additional inference providers are not completion requirements. Note dictation uses built-in browser speech recognition; no dictation backend is required.
