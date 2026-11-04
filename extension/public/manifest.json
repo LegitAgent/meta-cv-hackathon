@@ -6,6 +6,7 @@
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
   "host_permissions": ["http://127.0.0.1/*"],
+  "optional_host_permissions": ["https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "Pause here" },
   "side_panel": { "default_path": "panel.html" }

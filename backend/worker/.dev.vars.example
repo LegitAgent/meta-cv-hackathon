@@ -1,0 +1,10 @@
+# Copy to .dev.vars. Never commit real values.
+# Direct Muse API credentials. Endpoint/model must be verified with its docs.
+AI_API_KEY="your-muse-api-key"
+AI_BASE_URL=""
+AI_MODEL=""
+# Generate a random value; enter this SAME value in the extension settings.
+# This is a demo access credential, NOT the provider API key.
+BACKTRACK_ACCESS_TOKEN="replace-with-at-least-32-random-characters"
+# Copy your ID from chrome://extensions after loading extension/dist.
+ALLOWED_EXTENSION_ORIGINS="chrome-extension://your-extension-id"

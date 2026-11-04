@@ -18,9 +18,12 @@ export async function postSummary(
   const onExternalAbort = () => controller.abort(opts?.signal?.reason ?? new Error("ABORTED"));
   opts?.signal?.addEventListener("abort", onExternalAbort, { once: true });
   try {
+    const { backendCredential } = await chrome.storage.session.get("backendCredential");
+    const authorization: Record<string, string> = backendCredential?.origin === new URL(backendUrl).origin && backendCredential?.token
+      ? { Authorization: `Bearer ${backendCredential.token}` } : {};
     const res = await fetch(`${backendUrl.replace(/\/$/, "")}/api/v1/summaries`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authorization },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });

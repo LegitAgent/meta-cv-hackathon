@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Checkpoint, Note, SummaryJob } from "../shared/contracts";
 import { postSummary } from "./api";
+import { ConnectionSettings } from "./components/ConnectionSettings";
 import {
   mergeSavedNote,
   resolveAdoptedDraft,
@@ -457,11 +458,12 @@ export default function App() {
         />
       )}
 
+      <ConnectionSettings backendUrl={snap.workspace.backendUrl} onSaved={refresh} />
       <footer>
         <button className="link" onClick={() => void exportJson()}>
           Export JSON
         </button>
-        <span className="meta">Local-only storage · backend {snap.workspace.backendUrl}</span>
+        <span className="meta">Notes saved locally · backend {snap.workspace.backendUrl}</span>
       </footer>
     </div>
   );

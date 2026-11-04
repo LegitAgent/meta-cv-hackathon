@@ -11,3 +11,9 @@ extension/dist/
 extension/node_modules/
 
 .npm-cache/
+backend/worker/node_modules/
+backend/worker/dist/
+backend/worker/.wrangler/
+backend/worker/.dev.vars
+backend/worker/.dev.vars.*
+!backend/worker/.dev.vars.example

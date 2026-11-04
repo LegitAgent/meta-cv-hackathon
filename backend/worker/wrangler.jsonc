@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "backtrack-api",
+  "main": "src/entry.ts",
+  "compatibility_date": "2026-11-01",
+  "vars": {
+    // Set these from the direct Muse API documentation before deployment.
+    "AI_BASE_URL": "",
+    "AI_MODEL": "",
+    "ALLOWED_EXTENSION_ORIGINS": "",
+    "CACHE_TTL_SECONDS": "300"
+  },
+  "ratelimits": [
+    { "name": "IP_LIMITER", "namespace_id": "43001", "simple": { "limit": 30, "period": 60 } },
+    { "name": "TOKEN_LIMITER", "namespace_id": "43002", "simple": { "limit": 10, "period": 60 } }
+  ],
+  "observability": { "enabled": false }
+}
