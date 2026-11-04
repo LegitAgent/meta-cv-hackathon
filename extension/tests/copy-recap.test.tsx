@@ -40,3 +40,11 @@ it("copies the recap and flashes green, then fades", async () => {
   });
   expect(screen.getByRole("button", { name: "Copy recap" }).className).not.toContain("copied");
 });
+
+it("surfaces a hint when the clipboard write fails", async () => {
+  const writeText = vi.fn(async (_text: string) => { throw new Error("denied"); });
+  Object.assign(navigator, { clipboard: { writeText } });
+  render(<SummaryCard job={job()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Copy recap" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Copy failed");
+});

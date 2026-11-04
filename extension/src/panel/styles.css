@@ -157,6 +157,16 @@ button.primary:hover:not(:disabled) {
   color: #ffffff;
 }
 
+button.primary.copied {
+  background: var(--green);
+  border-color: var(--green);
+  color: #ffffff;
+}
+
+.copy-recap {
+  flex: 1;
+}
+
 @media (prefers-color-scheme: dark) {
   button.primary:hover:not(:disabled) {
     color: var(--blue-ink);
@@ -347,7 +357,7 @@ pre.code {
 }
 
 .tab.active {
-  border: none;
+  border-color: transparent;
   color: var(--blue);
   background: color-mix(in srgb, var(--blue) 12%, transparent);
 }
@@ -421,6 +431,41 @@ ul.history li.selected {
   font-weight: 600;
 }
 
+.diff {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.diff-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.resume-stack ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resume-stack li {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
 ul.history li.selected::before {
   content: "";
   display: block;
@@ -429,6 +474,68 @@ ul.history li.selected::before {
   border-radius: 1px;
   background: var(--green);
   margin-bottom: 4px;
+}
+
+.history-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-top {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.history-confirm {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+
+.history-all {
+  align-items: center;
+}
+
+select {
+  padding: 8px 10px;
+  font: inherit;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+}
+
+.format-bar {
+  flex-wrap: wrap;
+}
+
+.preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.preview > *:first-child {
+  margin-top: 0;
+}
+
+.preview > *:last-child {
+  margin-bottom: 0;
+}
+
+.saved-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .src {
@@ -580,41 +687,60 @@ details.paste-box {
   font-size: 15px;
 }
 
-.wiki-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.wiki-standfirst {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.wiki-toc {
   font-size: 13px;
 }
 
-.wiki-body h4 {
-  margin: 0 0 6px;
-  font-size: 12px;
+.wiki-toc span {
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
+}
+
+.wiki-toc ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wiki-toc a {
+  color: var(--blue);
+}
+
+.wiki-body {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+}
+
+.wiki-body article {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.wiki-body article:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.wiki-body h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
 }
 
 .wiki-body p {
-  margin: 0;
+  margin: 0 0 8px;
+  line-height: 1.5;
 }
 
-.wiki-body dl {
-  margin: 0;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 12px;
-}
-
-.wiki-body dt {
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.wiki-body dd {
-  margin: 0;
-  color: var(--muted);
+.wiki-body p:last-child {
+  margin-bottom: 0;
 }
 
 /* Wider panels: roomier cards, two-column history rows. */

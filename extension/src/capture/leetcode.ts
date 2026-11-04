@@ -3,7 +3,7 @@
 // editor lines are labeled partial unless completeness is proven, and
 // problem examples are never treated as user code.
 
-import { CODE_MAX, cap, type ExtractionOutcome, type RawPageExtraction } from "./types";
+import { CODE_MAX, PAGE_TEXT_MAX, SELECTED_MAX, cap, type ExtractionOutcome, type RawPageExtraction } from "./types";
 
 export const LEETCODE_SELECTORS = {
   problemContainer: [
@@ -17,7 +17,7 @@ export const LEETCODE_SELECTORS = {
   languageLabel: ['[data-testid="language-select"]', ".ant-select-selection-item", '[class*="language"]'],
 } as const;
 
-const PROBLEM_URL_RE = /^https:\/\/leetcode\.com\/problems\/[^/]+\/?/;
+const PROBLEM_URL_RE = /^https:\/\/(?:www\.)?leetcode\.(?:com|cn)\/problems\/[^/]+\/?/;
 
 export function isLeetCodeProblemUrl(url: string): boolean {
   return PROBLEM_URL_RE.test(url);
@@ -81,8 +81,8 @@ export function buildLeetCodeOutcome(
   if (raw.code === null) missing.push("code");
   if (raw.codePartial && raw.code !== null) warnings.push("Editor lines may be virtualized; code snapshot labeled partial.");
   const pageText = raw.pageTextFromProblem ?? raw.pageText;
-  const page = cap(pageText, 20000);
-  const sel = cap(raw.selectedText, 5000);
+  const page = cap(pageText, PAGE_TEXT_MAX);
+  const sel = cap(raw.selectedText, SELECTED_MAX);
   const code = raw.code === null ? null : cap(raw.code, CODE_MAX);
   const truncated = [...raw.truncatedFields];
   if (page.truncated) truncated.push("pageText");
@@ -114,6 +114,7 @@ export function extractLeetCodeProblemInPage(): {
   code: string | null;
   language: string | null;
   partial: boolean;
+  url: string;
 } {
   const problemSels = [
     '[data-track-load="description_content"]',
@@ -163,20 +164,5 @@ export function extractLeetCodeProblemInPage(): {
     }
   }
   // DOM lines may be virtualized: only visible lines are guaranteed.
-  return { problemText, code, language, partial: true };
-}
-
-/** Self-contained MAIN/isolated-world page function. Returns only code/language. */
-export function extractLeetCodeCodeInPage(): { code: string | null; language: string | null; partial: boolean } {
-  const lineSels = [".view-lines .view-line", ".monaco-editor .view-line"];
-  for (const sel of lineSels) {
-    const nodes = document.querySelectorAll(sel);
-    if (nodes.length > 0) {
-      const joined = Array.from(nodes)
-        .map((n) => n.textContent ?? "")
-        .join("\n");
-      if (joined.trim()) return { code: joined, language: null, partial: true };
-    }
-  }
-  return { code: null, language: null, partial: true };
+  return { problemText, code, language, partial: true, url: location.href };
 }

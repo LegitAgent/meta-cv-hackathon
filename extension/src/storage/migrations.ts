@@ -42,29 +42,40 @@ export async function reconcileOnStartup(area: AsyncStorageArea): Promise<Reconc
     if (key.startsWith("checkpoint:")) checkpoints.add(key.slice("checkpoint:".length));
     else if (key.startsWith("note:")) notes.add(key.slice("note:".length));
   }
-  const ws = { ...defaultWorkspace(), ...((all["workspace"] as Record<string, unknown>) ?? {}) } as {
-    openNoteIds: string[];
-    activeNoteId: string | null;
-    selectedCheckpointId: string | null;
-  };
-  const openNoteIds = ws.openNoteIds.filter((id) => {
-    if (!notes.has(id)) {
-      report.removedWorkspaceRefs.push(`openNote:${id}`);
-      return false;
-    }
-    return true;
-  });
-  let activeNoteId = ws.activeNoteId;
+  // A corrupt workspace record (wrong type, non-array ids) must not throw
+  // mid-reconcile and skip the remaining repairs. Coerce to safe defaults
+  // and persist only known fields, never the raw record.
+  const stored = all["workspace"];
+  const storedWs = stored && typeof stored === "object" ? (stored as Record<string, unknown>) : {};
+  if (stored !== undefined && (typeof stored !== "object" || stored === null))
+    report.removedWorkspaceRefs.push("workspace:invalid-shape");
+  const openNoteIds = (Array.isArray(storedWs.openNoteIds) ? storedWs.openNoteIds : [])
+    .filter((id): id is string => typeof id === "string")
+    .filter((id) => {
+      if (!notes.has(id)) {
+        report.removedWorkspaceRefs.push(`openNote:${id}`);
+        return false;
+      }
+      return true;
+    });
+  let activeNoteId = typeof storedWs.activeNoteId === "string" ? storedWs.activeNoteId : null;
   if (activeNoteId && !notes.has(activeNoteId)) {
     report.removedWorkspaceRefs.push(`activeNote:${activeNoteId}`);
     activeNoteId = openNoteIds[openNoteIds.length - 1] ?? null;
   }
-  let selectedCheckpointId = ws.selectedCheckpointId;
+  let selectedCheckpointId = typeof storedWs.selectedCheckpointId === "string" ? storedWs.selectedCheckpointId : null;
   if (selectedCheckpointId && !checkpoints.has(selectedCheckpointId)) {
     report.removedWorkspaceRefs.push(`selectedCheckpoint:${selectedCheckpointId}`);
     selectedCheckpointId = null;
   }
-  await area.set({ workspace: { ...defaultWorkspace(), ...(all["workspace"] as object), openNoteIds, activeNoteId, selectedCheckpointId } });
+  // Only known fields are persisted; endpoint and junk keys never survive a restart.
+  await area.set({ workspace: {
+    openNoteIds,
+    activeNoteId,
+    selectedCheckpointId,
+    aiEnabled: storedWs.aiEnabled === true,
+    autoSummarize: storedWs.autoSummarize === true,
+  } });
 
   // Orphans: valid records not referenced by the workspace (surfaced, kept).
   for (const id of notes) {

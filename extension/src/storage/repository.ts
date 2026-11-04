@@ -55,6 +55,8 @@ export function defaultSummaryJob(checkpointId: string): SummaryJob {
 export class Repository {
   private tail: Promise<unknown> = Promise.resolve();
 
+  // Reads intentionally bypass the queue; a torn multi-key read is possible
+  // and is repaired by reconcileOnStartup rather than by serializing reads.
   constructor(private area: AsyncStorageArea) {}
 
   /** Serialize mutations; concurrent callers queue behind the tail. */
@@ -224,11 +226,13 @@ export class Repository {
     noteIds: string[],
   ): Promise<{ job: SummaryJob; checkpoint: Checkpoint; notes: { id: string; revision: number; body: string }[]; missingNoteIds: string[] }> {
     return this.enqueue(async () => {
-      const got = await this.area.get([keyCheckpoint(checkpointId), keySummary(checkpointId), ...noteIds.map(keyNote)]);
+      // Duplicate ids would double-bill the transport budget and send twice.
+      const uniqueIds = [...new Set(noteIds)];
+      const got = await this.area.get([keyCheckpoint(checkpointId), keySummary(checkpointId), ...uniqueIds.map(keyNote)]);
       const cp = got[keyCheckpoint(checkpointId)] as Checkpoint | undefined;
       if (!cp) throw new Error("CHECKPOINT_NOT_FOUND");
       const prev = (got[keySummary(checkpointId)] as SummaryJob | undefined) ?? defaultSummaryJob(checkpointId);
-      const snapshots = noteIds.flatMap((id) => {
+      const snapshots = uniqueIds.flatMap((id) => {
         const n = got[keyNote(id)] as Note | undefined;
         return n ? [{
           id: n.id,
@@ -250,7 +254,7 @@ export class Repository {
       };
       await this.area.set({ [keySummary(checkpointId)]: job });
       const found = new Set(snapshots.map((s) => s.id));
-      const missingNoteIds = noteIds.filter((id) => !found.has(id));
+      const missingNoteIds = uniqueIds.filter((id) => !found.has(id));
       return { job, checkpoint: cp, notes: snapshots, missingNoteIds };
     });
   }

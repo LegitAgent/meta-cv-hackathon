@@ -5,7 +5,7 @@ function cp(id: string, taskKey: string, createdAt: string): Checkpoint {
   return {
     id, schemaVersion: 1, createdAt, taskKey, title: id,
     url: `https://${taskKey}`, adapter: "generic",
-    pageText: "p", selectedText: "", code: null, language: null, screenshot: null,
+    pageText: "p", selectedText: "", code: null, language: null, screenshot: null, stuckPoint: null,
     quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
   };
 }
@@ -39,6 +39,7 @@ function setup() {
         if (url === undefined) throw new Error("no tab");
         return { id: tabId, url };
       }),
+      query: vi.fn(async () => Object.entries(tabUrls).map(([id, url]) => ({ id: Number(id), url }))),
       onActivated: { addListener: (fn: NonNullable<typeof activated>) => { activated = fn; } },
       onUpdated: { addListener: (fn: NonNullable<typeof updated>) => { updated = fn; } },
     },
@@ -143,5 +144,13 @@ describe("tab following", () => {
     await loadBackground();
     updated!(7, { status: "complete" });
     expect(await selectedCheckpoint(records)).toBe("new");
+  });
+
+  it("ignores completion of a background tab", async () => {
+    const { records } = setup();
+    tabUrls = { 7: "https://example.com/task", 9: "https://example.com/task" };
+    await loadBackground();
+    updated!(9, { status: "complete" });
+    expect(await selectedCheckpoint(records)).toBe("old");
   });
 });

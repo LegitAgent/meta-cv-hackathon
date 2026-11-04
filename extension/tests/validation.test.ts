@@ -58,6 +58,9 @@ describe("validation boundaries", () => {
     expect(
       workerCommandSchema.safeParse({ type: "NOTE_CREATE", title: "ok", body: "x".repeat(50001) }).success,
     ).toBe(false);
+    expect(workerCommandSchema.safeParse({ type: "CAPTURE" }).success).toBe(true);
+    expect(workerCommandSchema.safeParse({ type: "CAPTURE", stuckPoint: "loop logic" }).success).toBe(true);
+    expect(workerCommandSchema.safeParse({ type: "CAPTURE", stuckPoint: "x".repeat(2001) }).success).toBe(false);
   });
 
   it("validates backend responses strictly", () => {

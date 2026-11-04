@@ -107,6 +107,7 @@ describe("summary payload from snapshots", () => {
     code: "x = 1",
     language: "python",
     screenshot: null,
+    stuckPoint: null,
     quality: { code: "partial", missingFields: [], truncatedFields: [], warnings: [] },
   } as Checkpoint;
 

@@ -16,6 +16,7 @@ function cp(): Checkpoint {
     code: null,
     language: null,
     screenshot: null,
+    stuckPoint: null,
     quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
   };
 }
@@ -42,6 +43,11 @@ describe("summary payload budget", () => {
     expect(warnings).toEqual([]);
   });
 
+  it("passes the stuck point through to the checkpoint payload", () => {
+    const { payload } = buildSummaryPayload({ ...cp(), stuckPoint: "loop logic" }, "r-4", []);
+    expect(payload.checkpoint.stuckPoint).toBe("loop logic");
+  });
+
   it("passes the screenshot through to the checkpoint payload", () => {
     const shot = "data:image/jpeg;base64," + "s".repeat(1000);
     const { payload } = buildSummaryPayload({ ...cp(), screenshot: shot }, "r-3", []);
@@ -59,5 +65,19 @@ describe("summary payload budget", () => {
     expect(payload.notes).toEqual([{ id: "note", body: "my note" }]);
     expect(warnings.some((w) => w.includes("trimmed"))).toBe(true);
     expect(checkpoint.code).toBe("partial code");
+  });
+
+  it("warns when pasted code belongs to another checkpoint", () => {
+    const { payload, warnings } = buildSummaryPayload(cp(), "r-5", [
+      { id: "code", revision: 0, body: "other code", kind: "codeOverride", linkedCheckpointId: "other-checkpoint" },
+    ]);
+    expect(payload.notes).toEqual([{ id: "code", body: "other code" }]);
+    expect(warnings.some((w) => w.includes("another checkpoint"))).toBe(true);
+  });
+
+  it("trims oversized captured code and warns", () => {
+    const { payload, warnings } = buildSummaryPayload({ ...cp(), code: "y".repeat(40000) }, "r-6", []);
+    expect(payload.checkpoint.code).toBe("y".repeat(LIMITS.CODE_MAX));
+    expect(warnings.some((w) => w.includes("Captured code was trimmed"))).toBe(true);
   });
 });

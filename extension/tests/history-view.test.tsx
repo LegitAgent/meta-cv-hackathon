@@ -8,7 +8,7 @@ function checkpoint(id: string, title: string, createdAt: string): Checkpoint {
   return {
     id, schemaVersion: 1, createdAt, taskKey: "task", title,
     url: `https://example.com/${id}`, adapter: "generic", pageText: "page", selectedText: "",
-    code: null, language: null, screenshot: null, quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
+    code: null, language: null, screenshot: null, stuckPoint: null, quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
   };
 }
 
@@ -33,6 +33,28 @@ it("filters checkpoints by text without a native confirm", () => {
   expect(screen.getByText("Beta page")).toBeTruthy();
   expect(confirm).not.toHaveBeenCalled();
   confirm.mockRestore();
+});
+
+it("selects and reopens the checkpoint on title click", () => {
+  const onSelect = vi.fn();
+  const onOpenCheckpoint = vi.fn();
+  render(
+    <HistoryView
+      checkpoints={[checkpoint("a", "Alpha page", "2026-01-01")]}
+      summaries={{}}
+      events={[]}
+      selectedId={null}
+      onSelect={onSelect}
+      onDelete={() => undefined}
+      onRetry={() => undefined}
+      aiEnabled={false}
+      onOpenCheckpoint={onOpenCheckpoint}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Alpha page" }));
+  expect(onSelect).toHaveBeenCalledWith("a");
+  expect(onOpenCheckpoint).toHaveBeenCalledTimes(1);
+  expect(onOpenCheckpoint.mock.calls[0][0].url).toBe("https://example.com/a");
 });
 
 it("sorts oldest first and confirms a single trash inline", () => {
@@ -80,4 +102,44 @@ it("trashes several checkpoints at once", () => {
   fireEvent.click(screen.getByRole("button", { name: "Trash selected (2)" }));
   fireEvent.click(screen.getByRole("button", { name: "Delete" }));
   expect(onDeleteMany).toHaveBeenCalledWith(["b", "a"]);
+});
+
+it("names filter-hidden checkpoints in the bulk delete confirm", () => {
+  render(
+    <HistoryView
+      checkpoints={[checkpoint("a", "Alpha", "2026-01-01"), checkpoint("b", "Beta", "2026-01-02")]}
+      summaries={{}}
+      events={[]}
+      selectedId={null}
+      onSelect={() => undefined}
+      onDelete={() => undefined}
+      onDeleteMany={() => undefined}
+      onRetry={() => undefined}
+      aiEnabled={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Select shown" }));
+  fireEvent.change(screen.getByLabelText("Filter checkpoints"), { target: { value: "beta" } });
+  fireEvent.click(screen.getByRole("button", { name: "Trash selected (2)" }));
+  expect(screen.getByRole("alert").textContent).toContain("1 hidden by the current filter");
+});
+
+it("explains disabled retry inline instead of title-only", () => {
+  const failed = {
+    checkpointId: "b", requestId: "r", status: "failed" as const, startedAt: "2026-01-01",
+    includedNoteSnapshots: [], result: null, error: { code: "HTTP_502", message: "down" }, warnings: [],
+  };
+  render(
+    <HistoryView
+      checkpoints={[checkpoint("a", "Alpha", "2026-01-01"), checkpoint("b", "Beta", "2026-01-02")]}
+      summaries={{ b: failed }}
+      events={[]}
+      selectedId={null}
+      onSelect={() => undefined}
+      onDelete={() => undefined}
+      onRetry={() => undefined}
+      aiEnabled={false}
+    />,
+  );
+  expect(screen.getByText("Enable AI in Resume to retry.")).toBeTruthy();
 });

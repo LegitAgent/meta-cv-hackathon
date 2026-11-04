@@ -35,6 +35,7 @@ function cp(id: string): Checkpoint {
     code: "x=1",
     language: "python",
     screenshot: null,
+    stuckPoint: null,
     quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
   };
 }
@@ -128,6 +129,15 @@ describe("repository", () => {
     expect(missingNoteIds).toEqual(["ghost"]);
   });
 
+  it("dedupes repeated note ids before snapshotting", async () => {
+    const repo = new Repository(memArea());
+    await repo.createCheckpoint(cp("c4d"));
+    const note = await repo.createNote("n");
+    const { notes, missingNoteIds } = await repo.beginSummary("c4d", [note.id, note.id]);
+    expect(notes).toHaveLength(1);
+    expect(missingNoteIds).toEqual([]);
+  });
+
   it("prunes old activity events on startup", async () => {
     const area = memArea();
     const repo = new Repository(area);
@@ -166,6 +176,16 @@ describe("repository", () => {
     const job = await repo.getSummaryJob("c2");
     expect(job.status).toBe("failed");
     expect(job.result).toEqual(summary);
+  });
+
+  it("reconciliation survives a corrupt workspace record", async () => {
+    const area = memArea({ workspace: "garbage", "checkpoint:c": cp("c") });
+    const report = await reconcileOnStartup(area);
+    expect(report.removedWorkspaceRefs).toContain("workspace:invalid-shape");
+    const ws = (await area.get(["workspace"]))["workspace"] as Record<string, unknown>;
+    expect(ws.openNoteIds).toEqual([]);
+    expect(ws.activeNoteId).toBe(null);
+    expect("backendUrl" in ws).toBe(false);
   });
 
   it("reconciliation drops invalid workspace refs and interrupts stale jobs", async () => {

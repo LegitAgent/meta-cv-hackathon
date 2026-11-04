@@ -14,6 +14,7 @@ function payload(): SummaryRequestPayload {
       code: null,
       language: null,
       screenshot: null,
+      stuckPoint: null,
       quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
     },
     notes: [],

@@ -18,6 +18,7 @@ function setup(opts: { signedIn?: boolean } = {}) {
   let resolveUpdate: (() => void) | null = null;
   let rejectUpdate: (() => void) | null = null;
   const updateSent = vi.fn();
+  const captures: unknown[] = [];
   const chromeMock = {
     storage: {
       local: {
@@ -35,7 +36,7 @@ function setup(opts: { signedIn?: boolean } = {}) {
     },
     runtime: {
       lastError: undefined,
-      sendMessage: (message: { type: string; id?: string; title?: string; body?: string; fields?: Record<string, unknown> }, callback: (response: unknown) => void) => {
+      sendMessage: (message: { type: string; id?: string; title?: string; body?: string; stuckPoint?: string; fields?: Record<string, unknown> }, callback: (response: unknown) => void) => {
         if (message.type === "NOTE_UPDATE") {
           updateSent(message);
           resolveUpdate = () => {
@@ -57,6 +58,7 @@ function setup(opts: { signedIn?: boolean } = {}) {
           records.workspace = { ...ws, openNoteIds: open, activeNoteId: ws.activeNoteId === message.id ? (open[open.length - 1] ?? null) : ws.activeNoteId };
           callback({ ok: true, data: { deleted: true } });
         } else if (message.type === "CAPTURE") {
+          captures.push(message);
           const cp = {
             id: "p1", schemaVersion: 1, createdAt: "2026-02-01", taskKey: "example.com/page",
             title: "Saved page", url: "https://example.com/page", adapter: "generic",
@@ -79,6 +81,7 @@ function setup(opts: { signedIn?: boolean } = {}) {
   vi.stubGlobal("chrome", chromeMock);
   return {
     records,
+    captures,
     updateSent,
     releaseSave: () => { if (!resolveUpdate) throw new Error("No save pending"); resolveUpdate(); },
     rejectSave: () => { if (!rejectUpdate) throw new Error("No save pending"); rejectUpdate(); },
@@ -210,16 +213,28 @@ it("keeping a note delete confirmation leaves the note alone", async () => {
   expect(screen.queryByRole("button", { name: "Delete note" })).not.toBeNull();
 });
 
+it("sends the stuck point with an explicit capture", async () => {
+  const { captures } = setup({ signedIn: true });
+  render(<App />);
+  fireEvent.change(await screen.findByRole("textbox", { name: "Where are you stuck? (optional)" }), {
+    target: { value: "loop logic" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save this page" }));
+  await waitFor(() => expect(captures).toHaveLength(1));
+  expect(captures[0]).toMatchObject({ type: "CAPTURE", stuckPoint: "loop logic" });
+  expect((screen.getByRole("textbox", { name: "Where are you stuck? (optional)" }) as HTMLInputElement).value).toBe("");
+});
+
 const checkpoint: Checkpoint = {
   id: "c", schemaVersion: 1, createdAt: "2026-01-01", taskKey: "task", title: "Task",
   url: "https://example.com", adapter: "generic", pageText: "page", selectedText: "",
-  code: "partial", language: "python", screenshot: null, quality: { code: "partial", missingFields: [], truncatedFields: [], warnings: [] },
+  code: "partial", language: "python", screenshot: null, stuckPoint: null, quality: { code: "partial", missingFields: [], truncatedFields: [], warnings: [] },
 };
 
 it("offers full-code paste for a partial capture", () => {
-  render(<ResumeView checkpoint={checkpoint} job={null} onCapture={() => undefined} capturing={false}
+  render(<ResumeView checkpoint={checkpoint} job={null} related={[]} onCapture={() => undefined} capturing={false}
     onSummarize={() => undefined} onCopyCode={() => undefined}
-    onOpenSource={() => undefined} busy={false}
+    onOpenSource={() => undefined} onOpenCheckpoint={() => undefined} busy={false}
     autoSummarize={false} onAutoSummarize={() => undefined} onPasteCode={async () => true} pasteError={null} />);
   expect(screen.getByText("Captured code is partial? Paste the full code")).toBeTruthy();
 });
@@ -237,7 +252,7 @@ it("opens the guide and closes it again", async () => {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Wiki" }));
   expect(await screen.findByText("Backtrack guide")).toBeTruthy();
-  expect(screen.getByText("Attach pasted code")).toBeTruthy();
+  expect(screen.getByText("Press Save this page to capture the current tab as a checkpoint. Optionally type where you are stuck first; it is stored with the checkpoint so the recap knows what you were wrestling with. Saving captures the page text, your selected text, editor code when it can be read, and a small screenshot.")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Close guide" }));
   await waitFor(() => expect(screen.queryByText("Backtrack guide")).toBeNull());
 });

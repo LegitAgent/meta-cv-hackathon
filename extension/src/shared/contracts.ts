@@ -26,6 +26,7 @@ export interface Checkpoint {
   code: string | null;
   language: string | null;
   screenshot: string | null;
+  stuckPoint: string | null;
   quality: Quality;
 }
 
@@ -121,10 +122,10 @@ export type WorkerCommand =
   | { type: "WORKSPACE_UPDATE"; fields: Partial<Workspace> }
   | { type: "SUMMARY_BEGIN"; checkpointId: string; noteIds: string[] }
   | { type: "SUMMARY_COMPLETE"; checkpointId: string; requestId: string; result: Summary }
-  | { type: "SUMMARY_FAIL"; checkpointId: string; requestId: string; error: { code: string; message: string } }
+  | { type: "SUMMARY_FAIL"; checkpointId: string; requestId: string; error: { code: string; message: string; retryAfterSeconds?: number } }
   | { type: "CHECKPOINT_DELETE"; id: string }
   | { type: "CHECKPOINT_RESUMED"; id: string }
-  | { type: "CAPTURE" };
+  | { type: "CAPTURE"; stuckPoint?: string };
 
 export type WorkerResponse =
   | { ok: true; data: unknown }
@@ -141,6 +142,7 @@ export interface SummaryRequestPayload {
     code: string | null;
     language: string | null;
     screenshot: string | null;
+    stuckPoint: string | null;
     quality: Quality;
   };
   notes: { id: string; body: string }[];
@@ -152,7 +154,8 @@ export const LIMITS = {
   SELECTED_MAX: 5000,
   NOTES_TOTAL_MAX: 10000,
   SCREENSHOT_MAX: 120000,
-  BODY_BYTES_MAX: 256 * 1024,
+  STUCK_POINT_MAX: 500,
+  // BODY_BYTES_MAX removed: the worker enforces the same cap as BODY_LIMIT.
 } as const;
 
 export function newId(): string {

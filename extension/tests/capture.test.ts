@@ -41,6 +41,8 @@ describe("capture adapters", () => {
 
   it("detects approved LeetCode URLs only", () => {
     expect(isLeetCodeProblemUrl("https://leetcode.com/problems/two-sum/")).toBe(true);
+    expect(isLeetCodeProblemUrl("https://www.leetcode.com/problems/two-sum/")).toBe(true);
+    expect(isLeetCodeProblemUrl("https://leetcode.cn/problems/two-sum/")).toBe(true);
     expect(isLeetCodeProblemUrl("https://leetcode.com/contest/weekly/")).toBe(false);
     expect(isLeetCodeProblemUrl("https://example.com/problems/two-sum/")).toBe(false);
   });

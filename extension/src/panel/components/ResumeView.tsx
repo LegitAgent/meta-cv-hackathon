@@ -5,7 +5,11 @@ function RetryCountdown({ readyAt }: { readyAt: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (readyAt <= Date.now()) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setNow(now);
+      if (now >= readyAt) window.clearInterval(timer);
+    }, 1000);
     return () => window.clearInterval(timer);
   }, [readyAt]);
   const left = Math.max(0, Math.ceil((readyAt - now) / 1000));
@@ -64,7 +68,7 @@ export function ResumeView({
   checkpoint: Checkpoint | null;
   job: SummaryJob | null;
   related: Checkpoint[];
-  onCapture: () => void;
+  onCapture: (stuckPoint: string) => void;
   capturing: boolean;
   onSummarize: () => void;
   onCopyCode: () => void;
@@ -77,10 +81,22 @@ export function ResumeView({
   pasteError: string | null;
 }) {
   const [paste, setPaste] = useState("");
+  const [stuck, setStuck] = useState("");
+  const save = () => {
+    onCapture(stuck);
+    setStuck("");
+  };
   if (!checkpoint)
     return (
       <section className="card">
-        <button className="primary large" onClick={onCapture} disabled={capturing}>
+        <input
+          value={stuck}
+          onChange={(e) => setStuck(e.target.value)}
+          placeholder="Where are you stuck? (optional)"
+          aria-label="Where are you stuck? (optional)"
+          maxLength={500}
+        />
+        <button className="primary large" onClick={save} disabled={capturing}>
           {capturing ? "Saving…" : "Save this page"}
         </button>
         <p className="hint">No checkpoint yet. Save the current tab to start a recap.</p>
@@ -90,11 +106,21 @@ export function ResumeView({
     <section className="card">
       <div className="row between">
         <span className="saved-pill" title={fmtTime(checkpoint.createdAt)}>Saved ✓</span>
-        <button onClick={onCapture} disabled={capturing}>
-          {capturing ? "Saving…" : "Save again"}
-        </button>
+        <span className="row">
+          <input
+            value={stuck}
+            onChange={(e) => setStuck(e.target.value)}
+            placeholder="Where are you stuck? (optional)"
+            aria-label="Where are you stuck? (optional)"
+            maxLength={500}
+          />
+          <button onClick={save} disabled={capturing}>
+            {capturing ? "Saving…" : "Save again"}
+          </button>
+        </span>
       </div>
       <h2>{checkpoint.title}</h2>
+      {checkpoint.stuckPoint && <p className="meta">Stuck on: {checkpoint.stuckPoint}</p>}
       <div className="meta">
         <span>{fmtTime(checkpoint.createdAt)}</span>
         <span>{checkpoint.adapter}</span>
@@ -129,6 +155,9 @@ export function ResumeView({
       )}
       {checkpoint.code && (
         <pre className="code">{checkpoint.code.slice(0, 4000)}</pre>
+      )}
+      {checkpoint.code && checkpoint.code.length > 4000 && (
+        <p className="hint">Showing the first 4,000 characters of the saved code.</p>
       )}
       {(!checkpoint.code || checkpoint.quality.code === "partial") && (
         <details className="paste-box">
@@ -197,6 +226,7 @@ export function ResumeView({
 export function SummaryCard({ job }: { job: SummaryJob | null }) {
   const [showFacts, setShowFacts] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const copyTimer = useRef<number | null>(null);
   useEffect(() => {
     return () => {
@@ -218,26 +248,16 @@ export function SummaryCard({ job }: { job: SummaryJob | null }) {
       )
       .then(() => {
         setCopied(true);
+        setCopyError(null);
         if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
         copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
       })
-      .catch(() => undefined);
+      .catch(() => setCopyError("Copy failed: your browser blocked clipboard access."));
   }
   return (
     <section className="card summary">
       <h3>Recap</h3>
       <p>{s.recap}</p>
-      <button
-        className={`icon-button${copied ? " copied" : ""}`}
-        onClick={copyRecap}
-        aria-label={copied ? "Copied" : "Copy recap"}
-        title={copied ? "Copied!" : "Copy recap"}
-      >
-        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-          <rect x="5" y="5" width="9" height="9" rx="2" />
-          <path d="M11 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h1" />
-        </svg>
-      </button>
       <button className="link" onClick={() => setShowFacts((v) => !v)}>
         {showFacts ? "Hide observed facts" : `Show observed facts (${s.observedFacts.length})`}
       </button>
@@ -268,6 +288,17 @@ export function SummaryCard({ job }: { job: SummaryJob | null }) {
           </ul>
         </div>
       )}
+      <div className="row">
+        <button
+          className={`primary copy-recap${copied ? " copied" : ""}`}
+          onClick={copyRecap}
+          aria-label={copied ? "Copied" : "Copy recap"}
+          title={copied ? "Copied!" : "Copy recap"}
+        >
+          {copied ? "Copied ✓" : "Copy recap"}
+        </button>
+        {copyError && <div className="error" role="alert">{copyError}</div>}
+      </div>
     </section>
   );
 }

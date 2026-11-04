@@ -13,6 +13,8 @@ export async function postSummary(
   payload: SummaryRequestPayload,
   opts?: { timeoutMs?: number; signal?: AbortSignal },
 ): Promise<BackendSummaryResponse> {
+  if (opts?.signal?.aborted)
+    throw Object.assign(new Error("Summary request was cancelled before sending."), { code: "ABORTED" });
   const timeoutMs = opts?.timeoutMs ?? PANEL_FETCH_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("TIMEOUT")), timeoutMs);
@@ -65,8 +67,21 @@ export async function postSummary(
   }
 }
 
-export async function getHealth(backendUrl: string): Promise<{ status: string; providerConfigured: boolean }> {
-  const res = await fetch(`${backendUrl.replace(/\/$/, "")}/health`);
-  if (!res.ok) throw new Error(`Backend health check failed (${res.status}).`);
-  return (await res.json()) as { status: string; providerConfigured: boolean };
+export async function getHealth(
+  backendUrl: string,
+  opts?: { timeoutMs?: number },
+): Promise<{ status: string; providerConfigured: boolean }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("TIMEOUT")), opts?.timeoutMs ?? 15_000);
+  try {
+    const res = await fetch(`${backendUrl.replace(/\/$/, "")}/health`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Backend health check failed (${res.status}).`);
+    return (await res.json()) as { status: string; providerConfigured: boolean };
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError")
+      throw new Error("Backend health check timed out.");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }

@@ -22,9 +22,15 @@ export function buildSummaryPayload(
   if (codeOverride && codeOverride.body.length > LIMITS.CODE_MAX) {
     warnings.push(`Pasted code was trimmed to ${LIMITS.CODE_MAX.toLocaleString("en-US")} characters for the recap.`);
   }
+  let code = codeOverride ? codeOverride.body.slice(0, LIMITS.CODE_MAX) : checkpoint.code;
+  if (!codeOverride && code && code.length > LIMITS.CODE_MAX) {
+    warnings.push(`Captured code was trimmed to ${LIMITS.CODE_MAX.toLocaleString("en-US")} characters for the recap.`);
+    code = code.slice(0, LIMITS.CODE_MAX);
+  }
   let used = 0;
   for (const s of snapshots) {
     if (s.kind === "codeOverride" && s.linkedCheckpointId === checkpoint.id) continue;
+    if (s.kind === "codeOverride") warnings.push(`Note "${s.id}" is pasted code for another checkpoint and was included as a regular note.`);
     const room = LIMITS.NOTES_TOTAL_MAX - used;
     if (room <= 0) {
       warnings.push(`Note "${s.id}" was left out: notes share a ${LIMITS.NOTES_TOTAL_MAX.toLocaleString("en-US")}-character recap budget.`);
@@ -49,9 +55,10 @@ export function buildSummaryPayload(
         title: checkpoint.title,
         pageText: checkpoint.pageText,
         selectedText: checkpoint.selectedText,
-        code: codeOverride ? codeOverride.body.slice(0, LIMITS.CODE_MAX) : checkpoint.code,
+        code,
         language: checkpoint.language,
         screenshot: checkpoint.screenshot,
+        stuckPoint: checkpoint.stuckPoint,
         quality: codeOverride ? {
           ...checkpoint.quality,
           warnings: [...checkpoint.quality.warnings, "Code for this recap came from a pasted note and replaces captured code."],

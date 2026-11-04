@@ -64,10 +64,20 @@ export function NoteTabs({
                 />
               ) : (
                 <span
+                  tabIndex={0}
                   onClick={() => onSelect(id)}
                   onDoubleClick={() => {
                     setEditingTab(id);
                     setEditTitle(n.title);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelect(id);
+                    } else if (e.key === "F2") {
+                      setEditingTab(id);
+                      setEditTitle(n.title);
+                    }
                   }}
                   title="Double-click to rename"
                 >
@@ -131,6 +141,7 @@ function NoteEditor({
   }, [note.id]);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
+  const [dictateError, setDictateError] = useState<string | null>(null);
   const recognitionRef = useRef<{ stop(): void; abort(): void } | null>(null);
   const insertAtRef = useRef(0);
   const draftRef = useRef(draft);
@@ -147,6 +158,9 @@ function NoteEditor({
         // Recognition never started; nothing to stop.
       }
       recognitionRef.current = null;
+      setListening(false);
+      setInterim("");
+      setDictateError(null);
     };
   }, [note.id]);
   function toggleDictation() {
@@ -200,6 +214,7 @@ function NoteEditor({
     recog.onerror = () => {
       setListening(false);
       setInterim("");
+      setDictateError("Dictation stopped: the microphone was denied or unavailable.");
     };
     recog.onend = () => {
       setListening(false);
@@ -210,6 +225,7 @@ function NoteEditor({
     try {
       recog.start();
       setListening(true);
+      setDictateError(null);
     } catch {
       recognitionRef.current = null;
       setListening(false);
@@ -250,6 +266,9 @@ function NoteEditor({
         <p className="hint" role="status">
           Listening… press Stop when done.{interim ? ` Heard: ${interim}` : ""}
         </p>
+      )}
+      {dictateError && !listening && (
+        <p className="error" role="alert">{dictateError}</p>
       )}
       {preview ? (
         <div className="preview" aria-label="Note preview" dangerouslySetInnerHTML={{ __html: renderPreview(draft.body) }} />

@@ -15,7 +15,7 @@ import {
   type PanelSnapshot,
   type PendingEdit,
 } from "./store";
-import { ResumeView, SummaryCard } from "./components/ResumeView";
+import { ResumeView, SummaryCard, getResumeStack } from "./components/ResumeView";
 import { NoteTabs, type SaveState } from "./components/NoteTabs";
 import { HistoryView } from "./components/HistoryView";
 import { WikiHelp } from "./components/WikiHelp";
@@ -29,6 +29,7 @@ export default function App() {
   const [view, setView] = useState<View>("resume");
   const [showWiki, setShowWiki] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [busySummary, setBusySummary] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [includeNoteIds, setIncludeNoteIds] = useState<string[]>([]);
@@ -299,13 +300,44 @@ export default function App() {
     return snap.checkpoints.find((c) => c.id === snap.workspace.selectedCheckpointId) ?? snap.checkpoints[0] ?? null;
   }, [snap]);
   const selectedJob: SummaryJob | null = (selectedCheckpoint && snap?.summaries[selectedCheckpoint.id]) || null;
+  const relatedStack: Checkpoint[] = useMemo(
+    () => getResumeStack(snap?.checkpoints ?? [], selectedCheckpoint),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [snap?.checkpoints, selectedCheckpoint?.id, selectedCheckpoint?.taskKey],
+  );
+
+  // Reopen never mutates saved code: it opens the URL and logs one
+  // checkpoint.resumed event. Falls back to copying the URL when tabs
+  // cannot be created (e.g. permissions or test environments).
+  const openCheckpoint = useCallback(
+    async (c: Checkpoint) => {
+      if (!c.url || !/^https?:\/\//.test(c.url)) return;
+      try {
+        await chrome.tabs.create({ url: c.url });
+      } catch {
+        try {
+          await navigator.clipboard.writeText(c.url);
+        } catch {
+          // Copy fallback is best-effort.
+        }
+      }
+      try {
+        await sendCommand({ type: "CHECKPOINT_RESUMED", id: c.id });
+      } catch {
+        // Resume event is advisory; the tab is already open.
+      }
+      await refresh();
+    },
+    [refresh],
+  );
 
   // Explicit in-panel capture ("Save this page"): the only way checkpoints
   // are created. Failures surface through the persisted lastCapture banner.
-  const captureNow = useCallback(async () => {
+  const captureNow = useCallback(async (stuckPoint: string) => {
     setCapturing(true);
     try {
-      await sendCommand({ type: "CAPTURE" });
+      const trimmed = stuckPoint.trim();
+      await sendCommand({ type: "CAPTURE", ...(trimmed ? { stuckPoint: trimmed } : {}) });
     } catch {
       // The worker records the outcome; the panel shows it.
     }
@@ -316,12 +348,16 @@ export default function App() {
   const runSummary = useCallback(
     async (checkpointId: string) => {
       if (busySummary || !aiEnabled || !signedIn || !credential) return;
+      // Drop ids for notes deleted elsewhere; the worker would only warn.
+      const liveIds = new Set((snap?.notes ?? []).map((n) => n.id));
+      const noteIds = includeNoteIds.filter((id) => liveIds.has(id));
+      if (noteIds.length !== includeNoteIds.length) setIncludeNoteIds(noteIds);
       setBusySummary(true);
       try {
         const { job, payload } = await sendCommand<{
           job: SummaryJob;
           payload: Parameters<typeof postSummary>[1];
-        }>({ type: "SUMMARY_BEGIN", checkpointId, noteIds: includeNoteIds });
+        }>({ type: "SUMMARY_BEGIN", checkpointId, noteIds });
         try {
           const res = await postSummary(BACKEND_URL, payload);
           await sendCommand({ type: "SUMMARY_COMPLETE", checkpointId, requestId: res.requestId, result: res.summary });
@@ -343,7 +379,7 @@ export default function App() {
         await refresh();
       }
     },
-    [busySummary, aiEnabled, signedIn, credential, includeNoteIds, refresh],
+    [busySummary, aiEnabled, signedIn, credential, includeNoteIds, snap?.notes, refresh],
   );
 
   const setAiEnabled = useCallback(
@@ -370,7 +406,10 @@ export default function App() {
   const pasteCode = useCallback(
     async (checkpointId: string, code: string): Promise<boolean> => {
       const checkpoint = snap?.checkpoints.find((c) => c.id === checkpointId);
-      if (!code.trim()) return false;
+      if (!code.trim()) {
+        setPasteError("Nothing to paste: the pasted text is empty.");
+        return false;
+      }
       if (code.length > 50000) {
         setPasteError("Pasted code exceeds the 50,000-character note limit. Shorten it before saving.");
         return false;
@@ -409,16 +448,21 @@ export default function App() {
   }, [snap?.checkpoints, snap?.summaries, aiEnabled, autoSummarize, busySummary, signedIn, runSummary]);
 
   const exportJson = useCallback(async () => {
-    const all = await chrome.storage.local.get(null);
-    const blob = new Blob([JSON.stringify({ schemaVersion: 1, exportedAt: new Date().toISOString(), records: all }, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "backtrack-export.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const all = await chrome.storage.local.get(null);
+      const blob = new Blob([JSON.stringify({ schemaVersion: 1, exportedAt: new Date().toISOString(), records: all }, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backtrack-export-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportError(null);
+    } catch (e) {
+      setExportError(e instanceof Error ? `Export failed: ${e.message}` : "Export failed.");
+    }
   }, []);
 
   if (loadError) return <div className="app"><div className="error">Storage error: {loadError}</div></div>;
@@ -454,20 +498,20 @@ export default function App() {
             </div>
           )}
           <ResumeView
-            onCapture={() => void captureNow()}
+            onCapture={(stuckPoint) => void captureNow(stuckPoint)}
             capturing={capturing}
             checkpoint={selectedCheckpoint}
             job={selectedJob}
+            related={relatedStack}
             busy={busySummary}
             autoSummarize={autoSummarize}
             onAutoSummarize={(v) => void setAutoSummarize(v)}
             onSummarize={() => selectedCheckpoint && void runSummary(selectedCheckpoint.id)}
             onCopyCode={() => selectedCheckpoint?.code && void navigator.clipboard.writeText(selectedCheckpoint.code).catch(() => undefined)}
             onOpenSource={() => {
-              const url = selectedCheckpoint?.url;
-              if (!url || !/^https?:\/\//.test(url)) return;
-              void chrome.tabs.create({ url });
+              if (selectedCheckpoint) void openCheckpoint(selectedCheckpoint);
             }}
+            onOpenCheckpoint={(c) => void openCheckpoint(c)}
             onPasteCode={(code) => selectedCheckpoint ? pasteCode(selectedCheckpoint.id, code) : Promise.resolve(false)}
             pasteError={pasteError}
           />
@@ -622,6 +666,7 @@ export default function App() {
           }}
           onRetry={(id) => void runSummary(id)}
           aiEnabled={aiEnabled}
+          onOpenCheckpoint={(c) => void openCheckpoint(c)}
         />
       )}
 
@@ -633,6 +678,7 @@ export default function App() {
         </button>
         <span className="meta">Notes saved on this device</span>
       </footer>
+      {exportError && <div className="error" role="alert">{exportError}</div>}
     </div>
   );
 }

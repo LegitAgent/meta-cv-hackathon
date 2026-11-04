@@ -24,6 +24,7 @@ export const checkpointSchema = z.object({
   code: z.string().max(LIMITS.CODE_MAX).nullable(),
   language: z.string().max(64).nullable(),
   screenshot: z.string().max(LIMITS.SCREENSHOT_MAX).nullable(),
+  stuckPoint: z.string().max(LIMITS.STUCK_POINT_MAX).nullable(),
   quality: qualitySchema,
 });
 
@@ -117,7 +118,7 @@ export const workerCommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("CHECKPOINT_DELETE"), id: z.string().min(1) }),
   z.object({ type: z.literal("CHECKPOINT_RESUMED"), id: z.string().min(1) }),
-  z.object({ type: z.literal("CAPTURE") }),
+  z.object({ type: z.literal("CAPTURE"), stuckPoint: z.string().max(2000).optional() }),
 ]);
 
 export const backendSummaryResponseSchema = z.object({

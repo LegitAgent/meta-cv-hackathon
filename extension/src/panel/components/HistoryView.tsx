@@ -29,6 +29,7 @@ export function HistoryView({
   onDeleteMany,
   onRetry,
   aiEnabled,
+  onOpenCheckpoint,
 }: {
   checkpoints: Checkpoint[];
   summaries: Record<string, SummaryJob>;
@@ -39,6 +40,7 @@ export function HistoryView({
   onDeleteMany?: (ids: string[]) => void | Promise<void>;
   onRetry: (id: string) => void;
   aiEnabled: boolean;
+  onOpenCheckpoint?: (c: Checkpoint) => void;
 }) {
   const [query, setQuery] = useState("");
   const [quality, setQuality] = useState<"all" | QualityCode>("all");
@@ -181,7 +183,7 @@ export function HistoryView({
                 {checked.length > 0 ? ` · ${checked.length} selected` : ""}
               </span>
               <span className="row">
-                <button className="link" onClick={() => setChecked(visibleIds)}>
+                <button className="link" onClick={() => setChecked((prev) => Array.from(new Set([...prev, ...visibleIds])))}>
                   Select shown
                 </button>
                 <button className="link" onClick={() => setChecked([])} disabled={checked.length === 0}>
@@ -199,7 +201,9 @@ export function HistoryView({
             {confirmMany && (
               <div className="history-confirm" role="alert">
                 <span>
-                  Delete {checked.length} checkpoint{checked.length === 1 ? "" : "s"}? Linked notes are kept.
+                  Delete {checked.length} checkpoint{checked.length === 1 ? "" : "s"}
+                  {checked.length - visibleIds.filter((id) => checkedSet.has(id)).length > 0
+                    ? ` (${checked.length - visibleIds.filter((id) => checkedSet.has(id)).length} hidden by the current filter)` : ""}? Linked notes are kept.
                 </span>
                 <span className="row">
                   <button className="danger" onClick={() => void runDeleteMany(checked)}>
@@ -221,7 +225,14 @@ export function HistoryView({
                         onChange={(e) => toggle(c.id, e.target.checked)}
                         aria-label={`Select ${c.title}`}
                       />
-                      <button className="link" onClick={() => onSelect(c.id)} title={c.title}>
+                      <button
+                        className="link"
+                        onClick={() => {
+                          onSelect(c.id);
+                          onOpenCheckpoint?.(c);
+                        }}
+                        title={`${c.title} — opens ${c.url}`}
+                      >
                         {c.title}
                       </button>
                     </span>
@@ -273,9 +284,12 @@ export function HistoryView({
                           </button>
                         )}
                         {job?.status === "failed" && (
-                          <button className="link" onClick={() => onRetry(c.id)} disabled={!aiEnabled} title={!aiEnabled ? "Enable AI in Resume to retry" : undefined}>
-                            Retry
-                          </button>
+                          <>
+                            <button className="link" onClick={() => onRetry(c.id)} disabled={!aiEnabled} title={!aiEnabled ? "Enable AI in Resume to retry" : undefined}>
+                              Retry
+                            </button>
+                            {!aiEnabled && <span className="hint">Enable AI in Resume to retry.</span>}
+                          </>
                         )}
                         <button className="link danger" onClick={() => setConfirmOne(c.id)}>
                           Trash

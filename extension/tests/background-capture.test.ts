@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type ClickedTab = { id: number; url?: string; windowId: number };
 
-type PanelMessage = { type: string };
+type PanelMessage = { type: string; stuckPoint?: string };
 
 function setup(tabUrl: string | undefined, liveUrls: (string | undefined)[] = []) {
   const records: Record<string, unknown> = {};
   let onClicked: ((tab: ClickedTab) => void) | undefined;
   let onMessage: ((message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => void) | undefined;
   let queryTabs: { id: number; url?: string; windowId: number }[] = [{ id: 7, windowId: 1 }];
-  const executeScript = vi.fn(async () => [{ result: {
+  const executeScript = vi.fn(async (): Promise<{ result: unknown }[]> => [{ result: {
     title: "Example task",
     url: "https://example.com/task",
     selectedText: "",
@@ -129,6 +129,47 @@ describe("capture edge cases", () => {
     const response = await send({ type: "CAPTURE" }) as unknown as CaptureFailure;
     expect(response.ok).toBe(false);
     expect(response.error.code).toBe("NAVIGATION_RACE");
+  });
+
+  it("keeps unavailable quality when the LeetCode read is denied on an empty page", async () => {
+    const leet = "https://leetcode.com/problems/two-sum/";
+    const { records, executeScript, send } = setup(leet, [leet]);
+    executeScript
+      .mockImplementationOnce(async () => [{ result: { title: "", url: leet, selectedText: "", pageText: "" } }])
+      .mockRejectedValueOnce(new Error("denied"));
+    await import("../src/background");
+    const response = await send({ type: "CAPTURE" });
+    expect(response.ok).toBe(true);
+    const stored = records["meta:lastCapture"] as { ok: boolean; checkpointId: string };
+    const cp = records[`checkpoint:${stored.checkpointId}`] as { quality: { code: string } };
+    expect(cp.quality.code).toBe("unavailable");
+  });
+
+  it("discards a capture when the tab navigates between extraction passes", async () => {
+    const a = "https://leetcode.com/problems/two-sum/";
+    const b = "https://leetcode.com/problems/other/";
+    const { executeScript, send } = setup(a, [a]);
+    executeScript
+      .mockImplementationOnce(async () => [{ result: { title: "Two Sum", url: a, selectedText: "", pageText: "desc" } }])
+      .mockImplementationOnce(async () => [{ result: { problemText: "desc", code: "x", language: "python", partial: true, url: b } }]);
+    await import("../src/background");
+    const response = await send({ type: "CAPTURE" }) as unknown as CaptureFailure;
+    expect(response.ok).toBe(false);
+    expect(response.error.code).toBe("NAVIGATION_RACE");
+  });
+
+  it("trims an overlong stuck point and flags it", async () => {
+    const { records, send } = setup(undefined);
+    await import("../src/background");
+    const response = await send({ type: "CAPTURE", stuckPoint: `stuck here ${"x".repeat(600)}` });
+    expect(response.ok).toBe(true);
+    const stored = records["meta:lastCapture"] as { ok: boolean; checkpointId: string };
+    const cp = records[`checkpoint:${stored.checkpointId}`] as {
+      stuckPoint: string | null;
+      quality: { code: string; warnings: string[] };
+    };
+    expect(cp.stuckPoint).toHaveLength(500);
+    expect(cp.quality.warnings.join(" ")).toContain("trimmed to 500 characters");
   });
 });
 

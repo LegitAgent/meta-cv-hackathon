@@ -3,6 +3,7 @@
 // the panel owns note drafts and executes inference requests while open.
 
 import {
+  LIMITS,
   newId,
   nowIso,
   type Checkpoint,
@@ -84,7 +85,15 @@ function isTrustedSender(sender: chrome.runtime.MessageSender): boolean {
 
 
 
-async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse> {
+async function captureTab(tabId: number, tabUrl: string, stuckPoint: string | null = null): Promise<WorkerResponse> {
+  // One optional line about where the user is stuck; trimming flags a
+  // warning but an empty value never blocks the save.
+  let stuck = (stuckPoint ?? "").trim() || null;
+  const captureWarnings: string[] = [];
+  if (stuck && stuck.length > LIMITS.STUCK_POINT_MAX) {
+    stuck = stuck.slice(0, LIMITS.STUCK_POINT_MAX);
+    captureWarnings.push(`Stuck point was trimmed to ${LIMITS.STUCK_POINT_MAX} characters.`);
+  }
   // The action callback can omit tab.url even when activeTab allows capture.
   // Ask Chrome again before injecting, then use the page's own URL if Chrome
   // still withholds it. A missing callback URL alone is not a capture failure.
@@ -131,6 +140,14 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
   const blocked = unsupportedReason(capturedUrl);
   if (blocked) return fail("UNSUPPORTED_PAGE", blocked);
 
+  const norm = (u: string) => {
+    try {
+      const p = new URL(u);
+      return `${p.hostname}${p.pathname}`;
+    } catch {
+      return u;
+    }
+  };
   const leetcode = isLeetCodeProblemUrl(capturedUrl);
   let outcome = buildGenericOutcome({
     title: generic.title || "Untitled",
@@ -141,7 +158,7 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
     language: null,
     missingFields: [],
     truncatedFields: [],
-    warnings: [],
+    warnings: [...captureWarnings],
   });
 
   if (leetcode) {
@@ -155,7 +172,13 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
         code: string | null;
         language: string | null;
         partial: boolean;
+        url: string;
       } | null;
+      // The two extraction passes run back to back; discard the pair when the
+      // tab navigated between them instead of mixing snapshots.
+      if (problemOut && norm(problemOut.url || "") !== norm(capturedUrl) && problemOut.url) {
+        return fail("NAVIGATION_RACE", "The tab navigated during capture. The mixed snapshot was discarded; capture again.");
+      }
       outcome = buildLeetCodeOutcome({
         title: generic.title || "Untitled",
         url: capturedUrl,
@@ -167,15 +190,16 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
         codePartial: problemOut ? problemOut.partial : true,
         missingFields: [],
         truncatedFields: [],
-        warnings: [],
+        warnings: [...captureWarnings],
       });
     } catch {
       // Fall back to the generic snapshot; never fail the whole capture.
+      // Keep "unavailable" when nothing was captured at all.
       outcome = {
         ...outcome,
         quality: {
           ...outcome.quality,
-          code: "partial",
+          code: outcome.quality.code === "unavailable" ? "unavailable" : "partial",
           warnings: [...outcome.quality.warnings, "LeetCode editor read was denied; saved page text only."],
         },
       };
@@ -190,14 +214,6 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
   } catch {
     liveUrl = capturedUrl;
   }
-  const norm = (u: string) => {
-    try {
-      const p = new URL(u);
-      return `${p.hostname}${p.pathname}`;
-    } catch {
-      return u;
-    }
-  };
   if (norm(liveUrl) !== norm(capturedUrl) || (initialUrl && norm(capturedUrl) !== norm(initialUrl))) {
     return fail("NAVIGATION_RACE", "The tab navigated during capture. The mixed snapshot was discarded; capture again.");
   }
@@ -230,6 +246,7 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
     code: outcome.code,
     language: outcome.language,
     screenshot,
+    stuckPoint: stuck,
     quality: outcome.quality,
   };
   try {
@@ -331,8 +348,10 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
           job.warnings = warnings;
         }
         return ok({ job, payload: built.payload });
-      } catch {
-        return fail("CHECKPOINT_NOT_FOUND", "Checkpoint no longer exists.");
+      } catch (e) {
+        if (e instanceof Error && e.message === "CHECKPOINT_NOT_FOUND")
+          return fail("CHECKPOINT_NOT_FOUND", "Checkpoint no longer exists.");
+        throw e;
       }
     }
     case "SUMMARY_COMPLETE": {
@@ -347,7 +366,7 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
     case "CAPTURE": {
       const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!active || active.id === undefined) return fail("NO_ACTIVE_TAB", "No active tab to capture.");
-      return runCaptureFlow(active.id, active.url ?? "");
+      return runCaptureFlow(active.id, active.url ?? "", typeof cmd.stuckPoint === "string" ? cmd.stuckPoint : null);
     }
     case "CHECKPOINT_DELETE": {
       const r = await repo.deleteCheckpoint(cmd.id);
@@ -357,6 +376,8 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
       const recorded = await repo.recordResume(cmd.id);
       return recorded ? ok({ recorded: true }) : fail("NOT_FOUND", "Checkpoint no longer exists.");
     }
+    default:
+      return fail("INVALID_COMMAND", "Command failed validation.");
   }
 }
 
@@ -398,10 +419,14 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
 // Shared capture-and-record flow: save locally first, then persist the
 // outcome so the panel can show failures, not just successes.
-async function runCaptureFlow(tabId: number, tabUrl: string): Promise<WorkerResponse> {
-  await ready.catch(() => undefined);
+async function runCaptureFlow(tabId: number, tabUrl: string, stuckPoint: string | null = null): Promise<WorkerResponse> {
+  try {
+    await ready;
+  } catch (e) {
+    return fail("WORKER_ERROR", e instanceof Error ? `Storage failed to initialize: ${e.message}` : "Storage failed to initialize.");
+  }
   await chrome.storage.local.set({ "meta:capturing": { at: nowIso(), tabId } }).catch(() => undefined);
-  const result = await captureTab(tabId, tabUrl);
+  const result = await captureTab(tabId, tabUrl, stuckPoint);
   await chrome.storage.local.remove(["meta:capturing"]).catch(() => undefined);
   if (result.ok) {
     const data = result.data as { checkpoint?: { id?: string } };
@@ -447,7 +472,17 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   void syncSelectionToTab(tabId);
 });
 chrome.tabs.onUpdated.addListener((tabId, info) => {
-  if (info.status === "complete" || info.url !== undefined) void syncSelectionToTab(tabId);
+  if (info.status !== "complete" && info.url === undefined) return;
+  // A background tab finishing load must not steal the selection: only sync
+  // when the updated tab is the active one.
+  void (async () => {
+    try {
+      const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (active?.id === tabId) void syncSelectionToTab(tabId);
+    } catch {
+      // Keep the current selection.
+    }
+  })();
 });
 
 ready = init();
