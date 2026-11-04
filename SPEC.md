@@ -27,7 +27,7 @@ Required:
 
 Deferred:
 
-- Microphone and voice output (note dictation via built-in browser speech recognition is implemented).
+- Microphone and voice output.
 - Continuous tracking, browsing-history collection, keystroke logging, and automatic distraction detection.
 - Site blocking, gaming detection, fitness advice, and productivity scoring.
 - Accounts, cloud note storage, cross-device sync, and collaboration.
@@ -197,15 +197,9 @@ This is a local activity history, not a tamper-proof audit trail. Do not log eve
 
 ## 10. Model provider
 
-Use Muse through one verified provider. The user has Baseten, Fireworks, and Modal available; actual credits and model access remain unverified.
+Use Muse through one verified provider: the direct Muse API at `https://api.meta.ai/v1`, model `muse-spark-1.3`.
 
-The supplied Baseten hackathon identifier is:
-
-```text
-meta-models/muse-spark-open-1026
-```
-
-Do not assume Fireworks or Modal uses this identifier or the same API. Verify endpoint, authentication, response format, and model access before implementation. Multi-provider routing and failover are deferred.
+The worker appends `/chat/completions` to `AI_BASE_URL` and sends the configured model id. Verify endpoint, authentication, response format, and model access before implementation. Multi-provider routing and failover are deferred.
 
 Built-in AI means an integrated feature backed by remote inference, not an on-device model.
 

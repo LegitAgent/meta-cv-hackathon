@@ -185,3 +185,88 @@ Files: `extension/src/panel/components/ResumeView.tsx` (`SummaryCard`), `styles.
 - `README.md` (root) and `extension/README.md`: updated for in-panel capture, History controls, global notes, paste-code override, summary states, empty-recap wording, dictation, Wiki popup, and test inventory.
 - `SPEC.md`: in-panel capture step, global-notes + dictation bullets, History/Wiki interface rows, Resume description, empty-input AI rule, repository status.
 - `TECHNICAL_SPEC.md`: status, file inventory, capture step, bulk-delete note, empty-recap prompt rule, validation plan, completion gate.
+
+---
+
+# Muse Spark review — 2026-11-05 (full-repo sweep, 6 parallel surfaces + synthesis)
+
+Scope: backend worker, background + capture, storage + shared, panel core, panel components, config + docs. Method: six read-only children opened every cited body, one synthesis child deduped against this file. Line numbers are approximate: the tree is being edited outside these turns (see drift note).
+
+Tree drift note (verified 2026-11-05): `extension/src/panel/styles.css` was restyled outside this session — the `.history-toolbar`, `.history-confirm`, `.history-top`, `.history-all`, `.icon-button`, and `select` rules added earlier are gone, and `ul.history li.selected` changed shape. Separately, `CHECKPOINT_RESUMED` (contracts, validation, background handler, App sender) and screenshot wiring (`SCREENSHOT_MAX`, payload/checkpoint `screenshot`) appeared without a review entry. The sweep ran against the current tree; entries below reflect it.
+
+Verification key: [V] = re-verified against current disk this session. Unmarked = agent-reported from inspected bodies, not independently re-checked. No live-Chrome or provider-inference verification for any entry.
+
+## Bugs (sweep)
+
+- B12 Low [V-disputed, kept] — `backend/worker/src/index.ts:152` — `Bearer` match is case-sensitive, so lowercase `bearer` 401s. Fix: `/^Bearer\s+/i` + test. Note: B1's original claim was already corrected as a redaction artifact; treat B12 as a new robustness nit, not a reopen.
+- B13 Low — `backend/worker/src/auth.ts:58` — token-endpoint body uses unbounded `response.json()`. Fix: cap upstream bytes, map over-limit to 503/504.
+- B14 Low — `backend/worker/src/schemas.ts:11` + `index.ts:70-76` — `screenshot` accepted as any string, forwarded as `image_url` with no data-URL check. Fix: 422-reject non-`data:image/` before spending budget.
+- B15 Low — `backend/worker/src/index.ts:88-93,108-111` — 35s abort racing an oversized provider stream rethrows raw 413. Fix: map to 504 when `signal.aborted`.
+- B16 Low — `backend/worker/src/index.ts:197-199` — error mapper drops `AuthError` retryability. Fix: propagate `retryable: true` for network-caused auth failures.
+- B17 Low — `backend/worker/src/auth.ts:35-37` — redirect allowlist silently filters to 32-char extension ids, so dev values yield empty list and every exchange 400s. Fix: warn when the allowlist filters everything out.
+- B18 Medium — `extension/src/background.ts:449-451` — `tabs.onUpdated` syncs selection for any tab, so a background tab steals `selectedCheckpointId`. Fix: only sync the active tab.
+- B19 Low — `extension/src/background.ts:172-182` — LeetCode denial fallback forces `partial` even when the generic outcome was `unavailable`. Fix: keep `unavailable` when nothing was captured.
+- B20 Low — `extension/src/background.ts:108,149,185-203` — two `executeScript` passes (generic, LeetCode) share one navigation guard with no mutual URL check. Fix: capture URL per pass, discard on mismatch.
+- B21 Low — `extension/src/background.ts:334-336` — `SUMMARY_BEGIN` catch-all maps every throw to `CHECKPOINT_NOT_FOUND`, masking storage/quota failures. Fix: pass through known codes.
+- B22 Low — `extension/src/background.ts:282-285` — tab switch clears a failed `meta:lastCapture` banner, discarding failure evidence. Fix: clear only on fresh success.
+- B23 Low — `extension/src/background.ts:401-403` — `runCaptureFlow` swallows init failure then writes on un-migrated storage. Fix: abort capture when reconciliation fails.
+- B24 Low — `extension/src/capture/leetcode.ts:20` — `PROBLEM_URL_RE` matches only `leetcode.com`; regional hosts fall back to generic. Fix: accept `leetcode.*`.
+- B25 Low — `extension/src/capture/leetcode.ts:84-85` — hardcoded 20000/5000 caps instead of `PAGE_TEXT_MAX`/`SELECTED_MAX`. Fix: reuse the shared constants.
+- B26 Medium — `extension/src/storage/migrations.ts:50` — reconcile calls `ws.openNoteIds.filter` without shape-guarding; corrupt workspace throws mid-reconcile and the swallow at `background.ts:378` skips remaining repairs. Fix: shape-guard with safe default.
+- B27 Medium [V] — `extension/src/storage/repository.ts:231` + `shared/validation.ts:105` — no dedupe of `noteIds`; duplicates double-bill the 10k budget and send twice. Fix: dedupe in validation or `beginSummary`.
+- B28 Low — `extension/src/storage/repository.ts:61,67,79` — reads bypass the enqueue queue, so readers can see torn multi-key writes. Fix: route reads through the queue or document the reconciliation-only repair.
+- B29 Low — `extension/src/storage/repository.ts:247` — new pending job carries `prev.result`, so a stale recap stays readable beside `pending`. Fix: clear `result` on new job.
+- B30 Low [V] — `extension/src/shared/contracts.ts:124` vs `validation.ts:116`, `repository.ts:283`, `background.ts:344` — `SUMMARY_FAIL` type omits `retryAfterSeconds` the runtime passes. Fix: add the optional field to the command type.
+- B31 Low — `extension/src/shared/payload.ts:19,27` — `codeOverride` with mismatched `linkedCheckpointId` silently bills as a regular note. Fix: warn/route explicitly.
+- B32 Low — `extension/src/shared/payload.ts:52` — `checkpoint.code` ships untrimmed, relying on capture-time caps. Fix: hard cap + warning at payload build.
+- B33 Low [V] — `extension/src/shared/contracts.ts:155` — `LIMITS.BODY_BYTES_MAX` defined once, referenced nowhere. Fix: enforce at worker entry or remove.
+- B34 Low — `extension/src/storage/migrations.ts:67` + `repository.ts:190` — startup rewrite persists raw record including stale `backendUrl`. Fix: strip `backendUrl` on startup write.
+- B35 Low [V] — `extension/src/panel/store.ts:110` — `snapshotFromStorage` spreads stored workspace then unconditionally overwrites `backendUrl` with the default, so a custom backend URL never persists. Fix: keep the stored value when present.
+- B36 Low [V] — `extension/src/panel/api.ts:68` — `getHealth` has no timeout while `postSummary` enforces 45s. Fix: add a matching timeout signal.
+- B37 Low — `extension/src/panel/api.ts:20` — `postSummary` never checks `opts.signal.aborted` upfront, so an already-aborted signal still sends the POST. Fix: pre-check and throw before fetch.
+- B38 Low — `extension/src/panel/App.tsx:431` — auto-summarize calls `runSummary` with startup `includeNoteIds` (normally empty), so automatic recaps never include notes. Fix: resolve the current selection at auto-run time.
+- B39 Low — `extension/src/panel/App.tsx:403-404` — whitespace-only paste returns `false` with no `pasteError`, unlike the 50k-length error. Fix: set a "nothing to paste" message.
+- B40 Low — `extension/src/panel/App.tsx:354,585` — `SUMMARY_BEGIN` sends `includeNoteIds` verbatim; deletions elsewhere rely on worker missing-note warnings. Fix: prune ids against live notes before sending.
+- B41 High — FIXED this session — `extension/src/panel/components/NoteTabs.tsx` — dictation cleanup aborted recognition on note switch without resetting `listening`/`interim`, leaving a stale "Listening…" banner on the new note. Fixed: cleanup now resets both; `tsc` clean.
+- B42 High — `extension/src/panel/components/NoteTabs.tsx:43-75` — tabs use `role="tab"` on a non-focusable span with click/double-click and no keyboard handler; keyboard users cannot select/rename tabs. Fix: real tab buttons with Enter/Space select and rename keys.
+- B43 Medium — `extension/src/panel/components/ResumeView.tsx:4-13` — `RetryCountdown` interval keeps firing `setNow` forever after reaching zero. Fix: clear the interval once the deadline passes.
+- B44 Medium [V, scope confirmed] — `extension/src/panel/components/HistoryView.tsx:184-198` — "Select shown" overwrites `checked` (dropping off-filter selections) while "Trash selected" deletes all checked ids including filter-hidden ones. Fix: bulk-operate on visible-checked only or confirm with explicit scope.
+- B45 Medium — `extension/src/panel/components/ResumeView.tsx:208-225` — `copyRecap` `.catch(()=>undefined)` swallows clipboard failures with no UI. Fix: surface a copy-error hint.
+- B46 Medium — `extension/src/panel/components/HistoryView.tsx:275-279` — disabled Retry carries its reason only in `title`, which browsers rarely show and screen readers skip. Fix: render visible helper text when AI is disabled.
+- B47 Medium — `extension/src/panel/components/NoteTabs.tsx:200-208` — `recog.onerror`/`onend` silently clear state, so denied mic looks like dictation just stopped. Fix: surface a dictation-error hint.
+- B48 Medium — `extension/src/panel/components/ResumeView.tsx:130-132` — code preview slices 4000 chars with no truncation indicator. Fix: append a "…truncated" note when clipped.
+- B49 Medium — `extension/src/panel/components/WikiHelp.tsx:5-31` — dialog has `aria-modal` but no focus trap, initial focus, or focus return. Fix: trap focus, focus on open, restore trigger on close.
+- B50 Low [V, confirmed on current disk] — `extension/src/panel/styles.css` — `.history-confirm`, `.history-toolbar`, `.history-top`, `.history-all`, `.icon-button`, `select`, `.format-bar`, `.preview`, `.saved-notes` have no rules after the outside restyle, so those banners/toolbars render unstyled; `.tab.active` drops the 1px border instead of transparentizing, shifting layout. Fix: restore the missing rules; keep the active border transparent.
+- B51 Medium (docs) — `TECHNICAL_SPEC.md:305` says "Enforce output field lengths and list counts with Pydantic" but the backend is TypeScript/Zod. Fix: rewrite the bullet for Zod.
+- B52 Medium (docs) — `SPEC.md:202-206` + `TECHNICAL_SPEC.md:316` cite `meta-models/muse-spark-open-1026` (Baseten) and `provider.py`/`AI_PROVIDER=baseten` vs actual `wrangler.jsonc:17-18` direct-Muse `muse-spark-1.3`. Fix: align docs to the real provider/model.
+- B53 Medium (docs) — `TECHNICAL_SPEC.md:190` SummaryJob contract still carries `inputHash`, removed by B11. Fix: drop the field.
+- B54 Low (docs) — `TECHNICAL_SPEC.md:88-100` manifest snippet omits `identity,tabs` granted in `extension/public/manifest.json:8`. Fix: update the snippet.
+- B55 Low (docs) — FIXED this session — `SPEC.md:30` kept dictation under Deferred after implementing it. Fixed: Deferred restored to "Microphone and voice output." (dictation already documented under note tabs).
+- B56 Low (docs) — `TECHNICAL_SPEC.md:318` env `ALLOWED_EXTENSION_ORIGIN` (singular) vs actual `ALLOWED_EXTENSION_ORIGINS`. Fix: correct the name.
+- B57 Low (docs) — `README.md:70,104` vs `wrangler.jsonc:15` — table implies `GOOGLE_CLIENT_ID` is a user placeholder while the file pins a real client ID. Fix: clarify the committed ID is a public default and when to override.
+
+## QOL opportunities (sweep)
+
+- Q7 — `backend/worker/src/index.ts:160-161` — 413 message hardcodes "256 KiB" while the cap is `BODY_LIMIT`. Interpolate the constant.
+- Q8 — `backend/worker/src/index.ts:60,173` — cache digest hashes raw `AI_BASE_URL` while fetch normalizes the trailing slash, duplicating cache entries. Hash the normalized URL.
+- Q9 — `extension/src/capture/leetcode.ts:170` — `extractLeetCodeCodeInPage` is dead code (background imports only the other three). Remove or wire as MAIN-world fallback.
+- Q10 — `extension/src/background.ts:291` — command switch has no default/never-exhaustiveness guard, so schema drift resolves `sendResponse(undefined)`. Add a default returning `INVALID_COMMAND`.
+- Q11 — `extension/src/storage/migrations.ts:70,114` — every closed note reported as `orphanNoteIds` (noise) and same-ms event pruning drops in arbitrary order. Only report truly orphaned notes; keep newest on ties.
+- Q12 — `extension/src/panel/App.tsx:441` — `exportJson` has no try/catch and always downloads `backtrack-export.json`. Catch failures with UI feedback; timestamp the filename.
+- Q13 — `extension/package.json:14` vs `backend/worker/package.json:14` — zod ^3 vs ^4 (worker uses zod-4-only `z.toJSONSchema`). Pin/align or document the split.
+- Q14 — `extension/package.json:26` vs `backend/worker/package.json:19` — vitest ^2 vs ^5 major drift. Align on one major.
+- Q15 — `TECHNICAL_SPEC.md:102`, `manifest.json:9`, `README.md:88` — "local host permission for the demo proxy" is stale; manifest already pins https-only. Rewrite as fixed-URL + source-change local-test flow.
+
+Unresolved: live-Chrome interaction and real provider inference were not inspected (all source/test-level); UI-timing, quota, and model-output effects remain unverified. One prior Medium (note-switch conflict trap) was deliberately not re-inspected per B3's recorded intent — reopen on reproduction.
+
+---
+
+# Fix pass — 2026-11-05 (all sweep items dispositioned)
+
+Fixed: B12 (case-insensitive Bearer + test), B13 (upstream body cap + parse mapping + tests), B14 (screenshot data-URL refine + test), B15 (413+aborted maps to 504 + race test), B16 (AuthError.retryable passthrough + test), B17 (empty allowlist 503 + test), B18 (active-tab guard + background-tab test), B19 (unavailable preserved + test), B20 (cross-pass URL compare + race test), B21 (known-code passthrough), B23 (init failure aborts capture), B24 (leetcode.cn/www + tests), B25 (shared caps), B26 (workspace shape-guard + corrupt-record test), B27 (note-id dedupe + test), B28 (reads-bypass-queue documented in code), B30 (SUMMARY_FAIL retryAfterSeconds type), B31 (mismatch warning + test), B32 (payload code cap + test), B33 (dead constant removed), B34 (startup write keeps known fields only + no-backendUrl test), B36 (health timeout), B37 (pre-check aborted signal), B39 (empty-paste message), B40 (prune deleted ids before SUMMARY_BEGIN), B42 (keyboard-operable tab titles, span contract kept), B43 (countdown interval cleared), B44 (union select + hidden-scope confirm text + test), B45 (copy-error hint + test), B46 (inline retry helper + test), B47 (dictation-error hint), B48 (truncation note), B49 (wiki focus trap + initial/return focus + test), B50 (missing history/toolbar/preview/saved-notes/select rules restored, .tab.active keeps its border), B51–B54 + B56–B57 (doc corrections), Q7 (interpolated cap), Q8 (normalized digest + cache test), Q9 (dead extractor removed), Q10 (default INVALID_COMMAND), Q11 (left as-is: orphanNoteIds is write-only, closed-note entries are harmless; event ties already deterministic via stable sort), Q12 (export try/catch + timestamped filename + error UI), Q15 (fixed-URL wording; README already compliant).
+
+Rejected with rationale: B22 (existing test + code comment encode deliberate clear-on-switch; left as-is), B29 (clearing result would destroy the SPEC §9 guarantee that a failed retry preserves the last good recap), B35 (fixed backend URL is intentional; stored values are ignored by design), B38 (auto-run already uses the live selection via its runSummary dep; empty selection is the explicit-selection rule, not a bug). Q13/Q14 deferred: no lockstep upgrades without running both suites; recorded in TECHNICAL_SPEC §12.
+
+Regression caught by the suite: the first B42 attempt (span→button) broke 4 panel tests that query `span[title='Double-click to rename']`. Reworked to a focusable span with Enter/Space/F2 handling, keeping the contract. Full extension suite now 127/127 across 20 files; backend 48/48; both typechecks clean.
+
+Flakiness note (pre-existing, intermittent): 4 autosave-timing tests in `panel.test.tsx` failed under parallel file execution in two runs (before and after this fix pass) but pass alone, serially, and in a later parallel re-run (127/127). Load-based flakiness in the tests, not a regression; re-run on failure before treating it as a break.

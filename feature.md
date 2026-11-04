@@ -58,9 +58,9 @@ Goal: one optional line at save time that focuses the recap.
 
 | Task | Files | Status |
 | ---- | ----- | ------ |
-| A. Resume stack | `extension/src/panel/components/ResumeView.tsx`, `extension/src/panel/App.tsx`, `extension/src/storage/repository.ts` (resume event) | not started |
-| B. Attempt diff | new `extension/src/shared/diff.ts`, `extension/src/panel/components/HistoryView.tsx`, `extension/tests/diff.test.ts` | not started |
-| C. Stuck-point tag | `extension/src/shared/contracts.ts`, `extension/src/storage/repository.ts`, `extension/src/background.ts`, `extension/src/panel/components/ResumeView.tsx`, `backend/worker/src/index.ts` | not started |
+| A. Resume stack | `extension/src/panel/components/ResumeView.tsx`, `extension/src/panel/App.tsx`, `extension/src/storage/repository.ts` (resume event) | in review — code + `resume-stack.test.tsx` added, `tsc` clean, vitest blocked by sandbox |
+| B. Attempt diff | new `extension/src/shared/diff.ts`, `extension/src/panel/components/HistoryView.tsx`, `extension/tests/diff.test.ts` | done — HistoryView toggle + 6 unit tests, 111/111 suite green; ResumeView toggle deferred to Task A to avoid editing the same file |
+| C. Stuck-point tag | `extension/src/shared/contracts.ts`, `extension/src/storage/repository.ts`, `extension/src/background.ts`, `extension/src/panel/components/ResumeView.tsx`, `backend/worker/src/index.ts` | done — capture input + trim/flag at 500 chars, persisted + shown under title, appended to provider text; 114/114 extension + 42/42 worker tests green |
 
 Suggested order: C → A → B. C changes the contract, A is UI-only, B is standalone.
 

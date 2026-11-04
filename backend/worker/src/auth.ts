@@ -6,7 +6,7 @@ export interface AuthEnv {
   ALLOWED_EXTENSION_ORIGINS: string;
 }
 export class AuthError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  constructor(public status: number, public code: string, message: string, public retryable = false) { super(message); }
 }
 const googleKeys = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"));
 
@@ -35,6 +35,8 @@ export async function exchangeGoogleCode(body: unknown, env: AuthEnv) {
   const redirects = (env.ALLOWED_EXTENSION_ORIGINS || "").split(",").map(s => s.trim())
     .filter(s => /^chrome-extension:\/\/[a-p]{32}$/.test(s))
     .map(s => `https://${s.slice("chrome-extension://".length)}.chromiumapp.org/`);
+  if (redirects.length === 0)
+    throw new AuthError(503, "AUTH_NOT_CONFIGURED", "No valid extension origin is configured.");
   if (!data || typeof data.code !== "string" || !data.code || data.code.length > 4096 ||
       typeof data.codeVerifier !== "string" || !/^[A-Za-z0-9._~-]{43,128}$/.test(data.codeVerifier) ||
       typeof data.nonce !== "string" || !/^[A-Za-z0-9_-]{43,128}$/.test(data.nonce) ||
@@ -50,12 +52,17 @@ export async function exchangeGoogleCode(body: unknown, env: AuthEnv) {
         redirect_uri: data.redirectUri, client_id: env.GOOGLE_CLIENT_ID,
         client_secret: env.GOOGLE_CLIENT_SECRET, grant_type: "authorization_code" }),
     });
-  } catch { throw new AuthError(503, "AUTH_UNAVAILABLE", "Google sign-in is temporarily unavailable."); }
+  } catch { throw new AuthError(503, "AUTH_UNAVAILABLE", "Google sign-in is temporarily unavailable.", true); }
   if (!response.ok) {
     await response.body?.cancel();
     throw new AuthError(401, "SIGN_IN_FAILED", "Google sign-in failed. Try again.");
   }
-  const result = await response.json() as { id_token?: string };
+  // Cap the upstream body: token responses are small JSON, never megabytes.
+  const raw = await response.text();
+  if (raw.length > 65536) throw new AuthError(503, "AUTH_UNAVAILABLE", "Google sign-in is temporarily unavailable.", true);
+  let result: { id_token?: string };
+  try { result = JSON.parse(raw); }
+  catch { throw new AuthError(401, "SIGN_IN_FAILED", "Google sign-in failed. Try again."); }
   if (!result.id_token) throw new AuthError(401, "SIGN_IN_FAILED", "Google did not return an identity token.");
   const identity = await verifyGoogleToken(result.id_token, env, data.nonce);
   // Only the short-lived identity token is returned. No Google API access or refresh tokens are stored.

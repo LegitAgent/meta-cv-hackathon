@@ -91,7 +91,7 @@ Initial development manifest:
   "name": "Backtrack",
   "version": "0.1.0",
   "minimum_chrome_version": "116",
-  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel", "identity", "tabs"],
   "host_permissions": ["https://backtrack.martinalba.dev/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "Pause here" },
@@ -99,7 +99,7 @@ Initial development manifest:
 }
 ```
 
-The local host permission is for the demo proxy; extension code should call only its fixed configured port. Replace it with the exact HTTPS backend origin for deployment. Do not add all_urls, browsing-history, or clipboard-read permissions.
+The manifest pins the fixed backend origin `https://backtrack.martinalba.dev/*`; the panel calls no other backend URL. Testing against a local worker requires a developer source change (`src/shared/config.ts`) plus the matching manifest host permission and a rebuild. Do not add all_urls, browsing-history, or clipboard-read permissions.
 
 The toolbar has no popup. Its click handler starts sidePanel.open immediately in the user-gesture handler and starts capture using the clicked tab ID. Avoid unrelated awaited work before opening the panel. Opening the panel manually from Chrome's UI does not automatically capture a page.
 
@@ -187,7 +187,6 @@ type SummaryJob = {
   requestId: string | null;
   status: 'idle' | 'pending' | 'complete' | 'failed';
   startedAt: string | null;
-  inputHash: string | null;
   includedNoteSnapshots: { id: string; revision: number; body: string }[];
   result: Summary | null;
   error: { code: string; message: string } | null;
@@ -216,7 +215,7 @@ Panel-to-worker commands:
 | WORKSPACE_UPDATE | allowed UI fields | Persist selection/order |
 | SUMMARY_BEGIN | checkpointId, selected note IDs | Snapshot inputs and allocate request ID |
 | SUMMARY_COMPLETE | checkpointId, requestId, result | Commit only if active job matches |
-| SUMMARY_FAIL | checkpointId, requestId, error | Set retryable failure if matching |
+| SUMMARY_FAIL | checkpointId, requestId, error (with optional retryAfterSeconds) | Set retryable failure if matching |
 | CHECKPOINT_DELETE | id | Remove checkpoint and summary; retain notes |
 ```
 
@@ -302,7 +301,7 @@ Response:
 
 Error responses use `{error: {code, message, retryable}}`. Map invalid input to 422, oversized bodies to 413, missing configuration to 503, rate limits to 429, provider failures to 502, and deadline expiration to 504. Sanitize upstream errors.
 
-Enforce a 256 KiB request-body limit before JSON parsing and independent character limits: 20k page text, 30k code, 5k selected text, and 10k notes in aggregate. Enforce output field lengths and list counts with Pydantic. UI and backend constraints must agree.
+Enforce a 256 KiB request-body limit before JSON parsing and independent character limits: 20k page text, 30k code, 5k selected text, and 10k notes in aggregate. Enforce output field lengths and list counts with Zod (`backend/worker/src/schemas.ts`). UI and backend constraints must agree.
 
 Set the upstream timeout below the panel deadline, approximately 35 seconds. Do not retry model calls automatically in the first build. Configure CORS only for the development extension origin where needed; CORS is not authentication. Bind locally for the demo. An internet-facing deployment must add authentication, rate limiting, and HTTPS before use.
 
@@ -311,14 +310,13 @@ Set the upstream timeout below the panel deadline, approximately 35 seconds. Do 
 Environment configuration:
 
 ```text
-AI_PROVIDER=baseten
-AI_BASE_URL=<verified provider endpoint>
-AI_MODEL=meta-models/muse-spark-open-1026
+AI_BASE_URL=https://api.meta.ai/v1
+AI_MODEL=muse-spark-1.3
 AI_API_KEY=<server-only secret>
-ALLOWED_EXTENSION_ORIGIN=chrome-extension://<development-extension-id>
+ALLOWED_EXTENSION_ORIGINS=chrome-extension://<extension-id>
 ```
 
-The Muse identifier is from the user's supplied Baseten hackathon instructions. Verify access with a minimal server-side request before integration. Do not assume Fireworks or Modal accepts the same model name. Keep endpoint/authentication details inside provider.py. Baseten's reference documents its chat completion interface; actual model support must be checked separately. [Baseten API reference](https://docs.baseten.co/reference/inference-api/chat-completions)
+The backend calls the direct Muse API: it appends `/chat/completions` to `AI_BASE_URL` and sends the model id from `AI_MODEL`. Verify access with a minimal server-side request before integration. Keep endpoint and authentication details in the worker (`backend/worker/src/index.ts`); the API key is a secret and never ships to the extension.
 
 Use a fixed system instruction that:
 
@@ -353,6 +351,7 @@ Automated checks:
 - Jobs: out-of-order results, retry supersession, malformed output, stale pending jobs, and the empty-input recap wording.
 - Panel: history filter/sort/inline trash and bulk delete, note dictation insertion, copy-recap flash, and the sign-in gate.
 - API: size bounds, invalid schemas, upstream timeout/error mapping, and absence of raw secret-bearing error text.
+- Dependencies: the extension pins vitest 2 / zod 3 while the worker uses vitest 5 / zod 4; aligning majors is deferred until both suites can be run lockstep.
 
 Manual Chrome checks:
 

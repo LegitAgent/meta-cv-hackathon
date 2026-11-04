@@ -92,6 +92,42 @@ describe("Worker gateway", () => {
     expect(response.status).toBe(200);
     expect(t.fetcher).toHaveBeenCalledTimes(1);
   });
+  it("accepts a lowercase bearer scheme", async () => {
+    const t = setup();
+    const response = await t.send(input(), { Authorization: `bearer ${token}` });
+    expect(response.status).toBe(200);
+    expect(t.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("rejects screenshots that are not data URLs", async () => {
+    const t = setup();
+    const body = { ...input(), checkpoint: { ...input().checkpoint, screenshot: "https://evil.example/shot.png" } };
+    const response = await t.send(body);
+    expect(response.status).toBe(422);
+    expect(t.fetcher).not.toHaveBeenCalled();
+  });
+  it("shares cache between trailing-slash base URL variants", async () => {
+    const t = setup();
+    expect((await t.send()).headers.get("X-Backtrack-Cache")).toBe("MISS");
+    await Promise.all(t.tasks);
+    t.env.AI_BASE_URL = "https://provider.example/v1/";
+    const response = await t.send(input());
+    expect(response.headers.get("X-Backtrack-Cache")).toBe("HIT");
+    expect(t.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("maps an aborted oversized provider stream to timeout", async () => {
+    const t = setup();
+    t.fetcher.mockImplementation(() => new Promise(res => setTimeout(() => res(new Response("x".repeat(BODY_LIMIT + 1))), 40000)));
+    vi.useFakeTimers();
+    try {
+      const responsePromise = t.send();
+      await vi.waitFor(() => expect(t.fetcher).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(35001);
+      await vi.advanceTimersByTimeAsync(5000);
+      const response = await responsePromise;
+      expect(response.status).toBe(504);
+      expect(await response.json()).toMatchObject({ error: { code: "UPSTREAM_TIMEOUT" } });
+    } finally { vi.useRealTimers(); }
+  });
   it("sends the screenshot as an image part alongside the text", async () => {
     const t = setup();
     const shot = `data:image/jpeg;base64,${"a".repeat(1000)}`;
@@ -104,6 +140,15 @@ describe("Worker gateway", () => {
       { type: "image_url", image_url: { url: shot } },
     ]);
     expect(sent.messages[1].content[0].text).not.toContain("data:image");
+  });
+  it("appends the stuck point to the provider text", async () => {
+    const t = setup();
+    const body = { ...input(), checkpoint: { ...input().checkpoint, stuckPoint: "loop logic" } };
+    expect((await t.send(body)).status).toBe(200);
+    const sent = JSON.parse(t.fetcher.mock.calls[0][1].body);
+    const content = sent.messages[1].content;
+    const text = typeof content === "string" ? content : content[0].text;
+    expect(text).toContain("User stuck point: loop logic");
   });
   it("fails closed when auth is not configured", async () => {
     const t = setup(); t.env.GOOGLE_CLIENT_ID = "";

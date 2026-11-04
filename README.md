@@ -67,7 +67,7 @@ The nonsecret settings are in `backend/worker/wrangler.jsonc`:
 | --- | --- |
 | AI_BASE_URL | `https://api.meta.ai/v1` |
 | AI_MODEL | `muse-spark-1.3` |
-| GOOGLE_CLIENT_ID | Your Google OAuth Web application client ID (public) |
+| GOOGLE_CLIENT_ID | Public default client ID committed in `wrangler.jsonc`; replace it in your own fork when you use a different Google Cloud project |
 | ALLOWED_EXTENSION_ORIGINS | Comma-separated exact extension origins; set your actual ID locally and before deployment |
 | CACHE_TTL_SECONDS | `300`; set `0` to disable caching |
 

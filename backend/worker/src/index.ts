@@ -57,7 +57,10 @@ async function infer(env: Env, input: SummaryInput) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35000);
   try {
-    const response = await fetch(`${env.AI_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
+    const userText =
+      JSON.stringify(promptInput(input)) + (input.checkpoint.stuckPoint ? "\nUser stuck point: " + input.checkpoint.stuckPoint : "");
+    const baseUrl = env.AI_BASE_URL.replace(/\/$/, "");
+    const response = await fetch(`${baseUrl}/chat/completions`, {
       // Do not follow redirects carrying the provider credential.
       method: "POST", redirect: "manual", signal: controller.signal,
       headers: { Authorization: `Bearer ${env.AI_API_KEY}`, "Content-Type": "application/json" },
@@ -71,11 +74,11 @@ async function infer(env: Env, input: SummaryInput) {
             ? {
                 role: "user",
                 content: [
-                  { type: "text", text: JSON.stringify(promptInput(input)) },
+                  { type: "text", text: userText },
                   { type: "image_url", image_url: { url: input.checkpoint.screenshot } },
                 ],
               }
-            : { role: "user", content: JSON.stringify(promptInput(input)) },
+            : { role: "user", content: userText },
         ],
       }),
     });
@@ -106,7 +109,13 @@ async function infer(env: Env, input: SummaryInput) {
     if (!parsed.success) throw new ApiError(502, "MODEL_OUTPUT_INVALID", "Model output failed validation.", true);
     return parsed.data;
   } catch (e) {
-    if (e instanceof ApiError) throw e;
+    if (e instanceof ApiError) {
+      // A 35s abort racing an oversized provider stream surfaces as 413 for a
+      // body the client never sent; prefer the timeout once aborted.
+      if (e.status === 413 && controller.signal.aborted)
+        throw new ApiError(504, "UPSTREAM_TIMEOUT", "Model request timed out.", true);
+      throw e;
+    }
     if (controller.signal.aborted) throw new ApiError(504, "UPSTREAM_TIMEOUT", "Model request timed out.", true);
     throw new ApiError(502, "PROVIDER_ERROR", "Model provider unreachable.", true);
   } finally { clearTimeout(timer); }
@@ -149,7 +158,7 @@ export function createHandler(cache: Pick<Cache, "match" | "put">) {
         const ip = request.headers.get("CF-Connecting-IP") || "local";
         if (!(await env.IP_LIMITER.limit({ key: await digest(ip) })).success)
           throw new ApiError(429, "RATE_LIMITED", "Too many requests. Retry in a minute.", true);
-        const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/, "") || "";
+        const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || "";
         if (token.length > 8192) throw new ApiError(401, "UNAUTHORIZED", "Sign in with Google again.");
         const identity = await verifyGoogleToken(token, env);
         const principal = await digest(identity.sub);
@@ -158,7 +167,7 @@ export function createHandler(cache: Pick<Cache, "match" | "put">) {
         if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json")
           throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Send application/json.");
         if (Number(request.headers.get("Content-Length")) > BODY_LIMIT)
-          throw new ApiError(413, "BODY_TOO_LARGE", "Request exceeds 256 KiB.");
+          throw new ApiError(413, "BODY_TOO_LARGE", `Request exceeds ${BODY_LIMIT / 1024} KiB.`);
         let body: unknown;
         const text = await readBounded(request.body, BODY_LIMIT);
         try { body = JSON.parse(text); } catch { throw new ApiError(422, "INVALID_INPUT", "Invalid JSON body."); }
@@ -170,7 +179,8 @@ export function createHandler(cache: Pick<Cache, "match" | "put">) {
         // Cache only validated summaries, scoped by credential + model + exact prompt/content.
         // IDs are excluded so repeated captures can reuse inference; response IDs stay fresh.
         // The screenshot is hashed separately: it never enters the JSON text.
-        const key = await digest(JSON.stringify([principal, env.AI_BASE_URL, env.AI_MODEL, PROMPT, promptInput(input), input.checkpoint.screenshot ?? null]));
+        const baseUrl = env.AI_BASE_URL.replace(/\/$/, "");
+        const key = await digest(JSON.stringify([principal, baseUrl, env.AI_MODEL, PROMPT, promptInput(input), input.checkpoint.screenshot ?? null]));
         const cacheRequest = new Request(`${new URL(request.url).origin}/_summary-cache/${key}`);
         const ttl = Math.min(3600, Math.max(0, Number(env.CACHE_TTL_SECONDS) || 0));
         let summary;
@@ -195,7 +205,7 @@ export function createHandler(cache: Pick<Cache, "match" | "put">) {
       }
     } catch (e) {
       const error = e instanceof ApiError ? e : e instanceof AuthError
-        ? new ApiError(e.status, e.code, e.message)
+        ? new ApiError(e.status, e.code, e.message, e.retryable)
         : new ApiError(503, "SERVICE_UNAVAILABLE", "Service temporarily unavailable.", true);
       response = json({ error: { code: error.code, message: error.message, retryable: error.retryable } }, error.status);
       if (error.status === 429) response.headers.set("Retry-After", "60");

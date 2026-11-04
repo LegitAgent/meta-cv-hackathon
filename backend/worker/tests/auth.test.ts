@@ -43,6 +43,19 @@ describe("Google identity verification", () => {
     await expect(exchangeGoogleCode({ ...request, redirectUri: "https://icmegjccphakockngdmbdbkfehdpfcfa.chromiumapp.org/", codeVerifier: "short" }, env)).rejects.toMatchObject({ status: 400 });
     expect(fetcher).not.toHaveBeenCalled();
   });
+  it("fails closed and retryable when the token endpoint is unreachable or oversized", async () => {
+    const request = { code: "code", codeVerifier: "v".repeat(43), nonce: "n".repeat(43),
+      redirectUri: "https://icmegjccphakockngdmbdbkfehdpfcfa.chromiumapp.org/" };
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("down"); }));
+    await expect(exchangeGoogleCode(request, env)).rejects.toMatchObject({ status: 503, code: "AUTH_UNAVAILABLE", retryable: true });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("x".repeat(70000), { status: 200 })));
+    await expect(exchangeGoogleCode(request, env)).rejects.toMatchObject({ status: 503, retryable: true });
+  });
+  it("rejects sign-in when no valid extension origin is configured", async () => {
+    const request = { code: "code", codeVerifier: "v".repeat(43), nonce: "n".repeat(43), redirectUri: "https://evil.example/" };
+    await expect(exchangeGoogleCode(request, { ...env, ALLOWED_EXTENSION_ORIGINS: "chrome-extension://test" }))
+      .rejects.toMatchObject({ status: 503, code: "AUTH_NOT_CONFIGURED" });
+  });
   it.each([302, 400])("uses Workers-compatible redirect handling and rejects upstream status %s", async status => {
     const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
       // Match the Workers runtime restriction that Node's fetch mock otherwise misses.
