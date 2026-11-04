@@ -83,8 +83,21 @@ function isTrustedSender(sender: chrome.runtime.MessageSender): boolean {
 
 
 async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse> {
-  const blocked = unsupportedReason(tabUrl);
-  if (blocked) return fail("UNSUPPORTED_PAGE", blocked);
+  // The action callback can omit tab.url even when activeTab allows capture.
+  // Ask Chrome again before injecting, then use the page's own URL if Chrome
+  // still withholds it. A missing callback URL alone is not a capture failure.
+  let initialUrl = tabUrl;
+  if (!initialUrl) {
+    try {
+      initialUrl = (await chrome.tabs.get(tabId)).url ?? "";
+    } catch {
+      // The in-page extractor can still provide location.href.
+    }
+  }
+  if (initialUrl) {
+    const blocked = unsupportedReason(initialUrl);
+    if (blocked) return fail("UNSUPPORTED_PAGE", blocked);
+  }
 
   // Generic extraction in the top frame.
   interface GenericResult { title: string; url: string; selectedText: string; pageText: string }
@@ -100,10 +113,14 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
   }
   if (!generic) return fail("EXTRACTION_EMPTY", "Nothing could be read from this page. Existing saved work is untouched.");
 
-  const leetcode = isLeetCodeProblemUrl(generic.url || tabUrl);
+  const capturedUrl = generic.url || initialUrl;
+  const blocked = unsupportedReason(capturedUrl);
+  if (blocked) return fail("UNSUPPORTED_PAGE", blocked);
+
+  const leetcode = isLeetCodeProblemUrl(capturedUrl);
   let outcome = buildGenericOutcome({
     title: generic.title || "Untitled",
-    url: generic.url || tabUrl,
+    url: capturedUrl,
     selectedText: generic.selectedText || "",
     pageText: generic.pageText || "",
     code: null,
@@ -127,7 +144,7 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
       } | null;
       outcome = buildLeetCodeOutcome({
         title: generic.title || "Untitled",
-        url: generic.url || tabUrl,
+        url: capturedUrl,
         selectedText: generic.selectedText || "",
         pageText: generic.pageText || "",
         pageTextFromProblem: problemOut?.problemText ?? null,
@@ -152,14 +169,13 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
   }
 
   // Navigation-race guard: discard mixed snapshots.
-  let liveUrl = tabUrl;
+  let liveUrl = capturedUrl;
   try {
     const tab = await chrome.tabs.get(tabId);
-    liveUrl = tab.url ?? tabUrl;
+    liveUrl = tab.url || capturedUrl;
   } catch {
-    liveUrl = tabUrl;
+    liveUrl = capturedUrl;
   }
-  const inPageUrl = generic.url || tabUrl;
   const norm = (u: string) => {
     try {
       const p = new URL(u);
@@ -168,11 +184,11 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
       return u;
     }
   };
-  if (norm(liveUrl) !== norm(tabUrl) || norm(inPageUrl) !== norm(tabUrl)) {
+  if (norm(liveUrl) !== norm(capturedUrl) || (initialUrl && norm(capturedUrl) !== norm(initialUrl))) {
     return fail("NAVIGATION_RACE", "The tab navigated during capture. The mixed snapshot was discarded; capture again.");
   }
 
-  const url = cleanUrl(generic.url || tabUrl);
+  const url = cleanUrl(capturedUrl);
   const cp: Checkpoint = {
     id: newId(),
     schemaVersion: 1,

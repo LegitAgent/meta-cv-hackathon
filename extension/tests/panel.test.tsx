@@ -103,16 +103,21 @@ describe("panel note switching", () => {
   });
 
   it("stops a note switch on revision conflict until the user resolves it", async () => {
-    const { records, updateSent, rejectSave } = setup();
+    const { records, updateSent, rejectSave, releaseSave } = setup();
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Note body" }), { target: { value: "my draft" } });
     fireEvent.click(screen.getByRole("button", { name: "+ Note" }));
     await waitFor(() => expect(updateSent).toHaveBeenCalledTimes(1));
+    records["note:a"] = { ...(records["note:a"] as Note), revision: 1, body: "other panel" };
     await act(async () => rejectSave());
     expect((records.workspace as { activeNoteId: string }).activeNoteId).toBe("a");
     expect(records["note:b"]).toBeUndefined();
-    expect(await screen.findByRole("button", { name: "Keep my draft" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Keep my draft" }));
+    await waitFor(() => expect(updateSent).toHaveBeenCalledTimes(2));
+    expect(updateSent.mock.calls[1][0]).toMatchObject({ id: "a", baseRevision: 1, body: "my draft" });
+    await act(async () => releaseSave());
+    await waitFor(() => expect((records["note:a"] as Note).body).toBe("my draft"));
   });
 });
 
