@@ -94,54 +94,53 @@ Muse should implement fixes and tests; Codex reviews and updates this file. Pres
 
 Scope: full repo read (`backend/worker/src/*.ts`, all `extension/src/**/*.ts(x)`, `manifest.json`, `wrangler.jsonc`, `.gitignore`, tests). `git status` shows 12 modified + 3 untracked files; findings below are against the working tree.
 
-Verified: `extension` — `tsc --noEmit` clean, `vitest run` 10 files / 63 tests passed. `backend/worker` — `tsc --noEmit` clean. Worker `vitest` was not run (unsandboxed execution needs approval; prompts are disabled in this session), so backend behavior claims are code-reading only.
+Verified 2026-11-05: `extension` — `tsc --noEmit` clean, `vitest run` 11 files / 69 tests passed. `backend/worker` — `tsc --noEmit` clean, `vitest run` 2 files / 39 tests passed (includes a second suite, `tests/auth.test.ts`, not covered in the original scan).
 
 ## Bugs
 
-### B1 — High: `Bearer` prefix regex corrupts tokens starting with `[REDACTED ]` characters
-File: `backend/worker/src/index.ts` (line 136):
-`token = ...replace(/^Bearer [REDACTED], "")`. `[REDACTED]` is a character class, not the word REDACTED, and there is no `+` quantifier, so it strips `"Bearer "` plus exactly one following character whenever that character is in `[REDACTED ]`. Any Google identity token whose first character after the space is in that set loses a character, fails `verifyGoogleToken`, and returns 401. Fix: `.replace(/^Bearer\s+/, "")`.
+### B1 — Low: `Bearer` prefix parsing too strict — COMPLETED
+File: `backend/worker/src/index.ts` (line 136). Correction (2026-11-05): the `[REDACTED]` character-class claim in the original write-up was a redaction artifact in the review tooling — the code was always `/^Bearer /`, verified byte-for-byte, so no token corruption ever occurred and the original High severity was wrong. (Note: the review tooling redacts the literal prefix pattern in prose; the source itself was verified byte-for-byte via char codes.) Fixed anyway as a robustness nit: `.replace(/^Bearer\s+/, "")` tolerates extra whitespace after the scheme. Regression test added in `backend/worker/tests/worker.test.ts` ("tolerates extra whitespace after the Bearer scheme"); worker suite passes 39/39.
 
-### B2 — Medium: rename-while-typing causes a spurious revision conflict
-File: `extension/src/panel/App.tsx` (`onRename`). Rename sends `NOTE_UPDATE` with the snapshot revision while the outbox may hold unsent typing for the same note. The rename bumps the revision, so the queued autosave then hits `REVISION_CONFLICT` and forces manual resolution for what is really one user's linear edits. Fix: drain/flush the outbox before rename, or fold pending text into the rename write.
+### B2 — Medium: rename-while-typing causes a spurious revision conflict — COMPLETED
+File: `extension/src/panel/App.tsx` (`onRename`). Rename sends `NOTE_UPDATE` with the snapshot revision while the outbox may hold unsent typing for the same note. The rename bumps the revision, so the queued autosave then hits `REVISION_CONFLICT` and forces manual resolution for what is really one user's linear edits. Fix applied: `onRename` now drains the outbox, re-reads the fresh revision from storage, and renames on top of it. Covered by a new panel test ("flushes pending typing before renaming the note").
 
-### B3 — Medium: note switch is blocked by transient save failures
-File: `extension/src/panel/App.tsx` (`drainOutbox` + `selectNote`). `flushSave` returns `false` on any failure including requeued transient errors, and `selectNote`/`onCreate`/`onClose` abort the navigation when `drainOutbox()` is false. Since the outbox already preserves per-note text safely across switches, a transient storage failure traps the user on the current note. Consider allowing the switch while keeping the queued edit.
+### B3 — Medium: note switch is blocked by transient save failures — COMPLETED
+File: `extension/src/panel/App.tsx` (`drainOutbox` + `selectNote`). `flushSave` returns `false` on any failure including requeued transient errors, and `selectNote`/`onCreate`/`onClose` abort the navigation when `drainOutbox()` is false. Since the outbox already preserves per-note text safely across switches, a transient storage failure traps the user on the current note. Fix applied: `drainOutbox` now returns false only for revision conflicts; transient failures keep their queued text and allow navigation. All existing note-switching tests still pass.
 
-### B4 — Medium: deleted selected notes are silently dropped from the recap request
-File: `extension/src/storage/repository.ts` (`beginSummary`). Note IDs with no live record are filtered out with no signal, so a recap can silently cover fewer notes than the user selected. At minimum surface a warning like the existing trim warnings.
+### B4 — Medium: deleted selected notes are silently dropped from the recap request — COMPLETED
+File: `extension/src/storage/repository.ts` (`beginSummary`). Note IDs with no live record are filtered out with no signal, so a recap can silently cover fewer notes than the user selected. Fix applied: `beginSummary` returns `missingNoteIds`, and the worker turns each into a persisted job warning (`Note "<id>" was deleted before the recap and was left out.`). Covered by a new repository test.
 
-### B5 — Low: redundant double `WORKSPACE_UPDATE` on note select
-File: `extension/src/panel/App.tsx` (`selectNote`). When the note is not yet open it sends one update for `activeNoteId` and a second adding `openNoteIds`; the second supersedes the first. One write is enough.
+### B5 — Low: redundant double `WORKSPACE_UPDATE` on note select — COMPLETED
+File: `extension/src/panel/App.tsx` (`selectNote`). When the note is not yet open it sends one update for `activeNoteId` and a second adding `openNoteIds`; the second supersedes the first. Fix applied: `selectNote` now sends a single `WORKSPACE_UPDATE`.
 
-### B6 — Low: non-JSON error pages throw `SyntaxError` instead of a friendly error
-File: `extension/src/panel/api.ts` (`responseJson`). `await response.json()` runs before the `ok` check, so a Cloudflare/proxy HTML error page escapes as `SyntaxError` with no `code`. Parse defensively and fall back to `HTTP_<status>`.
+### B6 — Low: non-JSON error pages throw `SyntaxError` instead of a friendly error — COMPLETED
+Fixed in `extension/src/panel/auth.ts` (`responseJson`) — correction: the crashing helper lives in auth.ts, not api.ts (`postSummary` in api.ts already catches parse failures). It now falls back to a status-based message and rejects unreadable success bodies explicitly.
 
-### B7 — Low: "virtualized lines" warning fires even when nothing was read
-Files: `extension/src/capture/leetcode.ts` + `extension/src/background.ts`. `extractLeetCodeProblemInPage` always returns `partial: true`, and `buildLeetCodeOutcome` warns whenever `codePartial` is true — including the all-null case where no editor lines were seen at all. Gate the warning on `code !== null`.
+### B7 — Low: "virtualized lines" warning fires even when nothing was read — COMPLETED
+Files: `extension/src/capture/leetcode.ts` + `extension/src/background.ts`. `extractLeetCodeProblemInPage` always returns `partial: true`, and `buildLeetCodeOutcome` warns whenever `codePartial` is true — including the all-null case where no editor lines were seen at all. Fix applied: the warning now requires `codePartial && code !== null`. Covered by a new capture test.
 
-### B8 — Low: missing `code` is hidden when the problem statement is also missing
-File: `extension/src/capture/leetcode.ts`. `else if (raw.code === null)` only records missing code when `pageTextFromProblem` exists. When both are absent the quality badge understates what is missing.
+### B8 — Low: missing `code` is hidden when the problem statement is also missing — COMPLETED
+File: `extension/src/capture/leetcode.ts`. `else if (raw.code === null)` only records missing code when `pageTextFromProblem` exists. When both are absent the quality badge understates what is missing. Fix applied: both fields are now recorded independently.
 
-### B9 — Low: `innerText` on a detached clone may under-read page text
-File: `extension/src/capture/generic.ts`. `innerText` is layout-dependent and can return `""` on detached nodes in some engines, producing `missing: ["pageText"]` on pages that do have text. `textContent` with whitespace collapsing is the safer fallback.
+### B9 — Low: `innerText` on a detached clone may under-read page text — COMPLETED
+File: `extension/src/capture/generic.ts`. `innerText` is layout-dependent and can return `""` on detached nodes in some engines, producing `missing: ["pageText"]` on pages that do have text. `textContent` with whitespace collapsing is the safer fallback. Fix applied in `extractGenericInPage`.
 
-### B10 — Info: dead/untracked files in the tree
-`extension/src/panel/components/SignInPage.tsx` (untracked) is not imported anywhere — `App.tsx` renders its own inline sign-in gate. `extension/patch-app2.py`, `patch-shim3.py`, `patch-shim4.py` are untracked helper scripts. Either wire them in or remove them; at minimum `gitignore` them if they are local tooling.
+### B10 — Info: dead/untracked files in the tree — COMPLETED (SignInPage; helper scripts intentionally left alone)
+`extension/src/panel/components/SignInPage.tsx` is now imported and rendered by `App.tsx` for the signed-out state, so the dead-code part is resolved. `extension/patch-app2.py`, `patch-shim3.py`, `patch-shim4.py` remain untracked — deliberately left untouched as the author's local tooling, not a bug.
 
-### B11 — Info: `inputHash` is never computed; abort path masks real errors
-`beginSummary` always stores `inputHash: null` (dead field — remove it or hash the payload for idempotency logging). In `backend/worker/src/index.ts` (`infer()` catch) any error becomes 504 `UPSTREAM_TIMEOUT` when `controller.signal.aborted` is set, including validation/`ApiError`s already in flight — check `e instanceof ApiError` first.
+### B11 — Info: `inputHash` is never computed; abort path masks real errors — COMPLETED
+`beginSummary` always stores `inputHash: null` (dead field — remove it or hash the payload for idempotency logging). In `backend/worker/src/index.ts` (`infer()` catch) any error becomes 504 `UPSTREAM_TIMEOUT` when `controller.signal.aborted` is set, including validation/`ApiError`s already in flight. Fix applied: the `catch` rethrows `ApiError` first, and the dead `inputHash` field was removed from contracts, validation, repository, and test fixtures.
 
 Not bugs (checked, OK): `.dev.vars` and `.npm-cache/` are properly gitignored; `GOOGLE_CLIENT_ID` in `wrangler.jsonc` is a public client ID by design; `setSummaryWarnings`/`completeSummary`/`failSummary` correctly gate on `requestId`; cache keys include principal + model + prompt + content; `TRUSTED_CONTEXTS` + sender checks are in place.
 
 ## QOL recommendations
 
-1. Show the 429 `Retry-After` countdown in the panel instead of a static message; the backend already sends the header.
-2. Display `job.warnings` next to the note checklist (currently only under Resume), so users see *which* notes were trimmed before retrying.
-3. Name pasted-code notes with the checkpoint title + timestamp; several "Pasted code" notes are indistinguishable in the selector.
-4. Add a "copy recap" button on `SummaryCard`; export JSON already exists but recaps cannot be copied in one click.
-5. Cap the `Activity` event list growth — events are append-only per checkpoint/summary and will eventually press against `chrome.storage.local` quota alongside the quota handling already in `captureTab`.
-6. Combine the two `WORKSPACE_UPDATE` writes in `selectNote` (B5) and debounce `syncSelectionToTab` on rapid tab switches.
+1. Show the 429 `Retry-After` countdown in the panel instead of a static message; the backend already sends the header. — COMPLETED: api.ts forwards `Retry-After` as `retryAfterSeconds` through `SUMMARY_FAIL` into `SummaryJob.error` (contracts + validation extended), and the ResumeView failure banner shows a ticking `RetryCountdown` for `RATE_LIMITED`. Covered by new `tests/api.test.ts`.
+2. Display `job.warnings` next to the note checklist (currently only under Resume), so users see *which* notes were trimmed before retrying. — COMPLETED: the Resume "Notes to include" section now renders the selected checkpoint's warnings.
+3. Name pasted-code notes with the checkpoint title + timestamp; several "Pasted code" notes are indistinguishable in the selector. — COMPLETED: titles are now `Pasted code — <title> · <YYYY-MM-DD HH:MM>`.
+4. Add a "copy recap" button on `SummaryCard`; export JSON already exists but recaps cannot be copied in one click. — COMPLETED: "Copy recap" copies recap + next action (+ blocker when present).
+5. Cap the `Activity` event list growth — events are append-only per checkpoint/summary and will eventually press against `chrome.storage.local` quota alongside the quota handling already in `captureTab`. — COMPLETED: `reconcileOnStartup` prunes to the newest 200 events and reports `prunedEventIds`. Covered by a new repository test.
+6. Combine the two `WORKSPACE_UPDATE` writes in `selectNote` (B5) and debounce `syncSelectionToTab` on rapid tab switches. — COMPLETED (single write only): `selectNote` now sends one update. Debounce deliberately skipped: `tab-follow.test.ts` asserts behavior on real timers and a trailing debounce would delay selection with no correctness gain.
 
 ## Design choices (as found — mostly sound)
 

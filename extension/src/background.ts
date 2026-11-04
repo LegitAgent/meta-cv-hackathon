@@ -110,6 +110,18 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
     });
     generic = (res?.result as GenericResult | null | undefined) ?? null;
   } catch {
+    // The click URL can be withheld, skipping the scheme check above: read the
+    // live tab URL to tell restricted pages apart from real denials.
+    try {
+      const liveUrl = (await chrome.tabs.get(tabId)).url ?? "";
+      const blocked = liveUrl ? unsupportedReason(liveUrl) : null;
+      if (blocked) {
+        if (liveUrl.startsWith("file:")) return fail("UNSUPPORTED_PAGE", `${blocked} Enable "Allow access to file URLs" on Backtrack's card in chrome://extensions to capture local files.`);
+        return fail("UNSUPPORTED_PAGE", blocked);
+      }
+    } catch {
+      // Fall through to the generic denial below.
+    }
     return fail("SCRIPT_DENIED", "The page denied access for capture. Existing saved work is untouched.");
   }
   if (!generic) return fail("EXTRACTION_EMPTY", "Nothing could be read from this page. Existing saved work is untouched.");
@@ -394,21 +406,12 @@ async function runCaptureFlow(tabId: number, tabUrl: string): Promise<WorkerResp
   return result;
 }
 
-// Toolbar click: open the panel immediately in the user-gesture handler,
-// then capture using the clicked tab ID.
+// Toolbar click only opens the panel. Checkpoints are created explicitly
+// through the in-panel "Save this page" button (CAPTURE command) — opening
+// the panel must never write a checkpoint on its own.
 chrome.action.onClicked.addListener((tab) => {
-  const tabId = tab.id;
-  const tabUrl = tab.url ?? "";
-  const open = tab.windowId !== undefined ? chrome.sidePanel.open({ windowId: tab.windowId }) : Promise.resolve();
-  void (async () => {
-    try {
-      await open;
-    } catch {
-      // Panel open failure must not block capture.
-    }
-    if (tabId === undefined) return;
-    await runCaptureFlow(tabId, tabUrl);
-  })();
+  if (tab.windowId === undefined) return;
+  void chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => undefined);
 });
 
 // Keep the panel on the current tab's work: tab switches and navigations

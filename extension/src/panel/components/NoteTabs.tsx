@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Note } from "../../shared/contracts";
+import { renderPreview, toggleBullets, wrapInline } from "./noteFormat";
 
 export type SaveState = "saved" | "saving" | "error" | "conflict";
 
@@ -122,6 +123,22 @@ function NoteEditor({
   saveState: SaveState;
   onDelete: (id: string) => void;
 }) {
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  const [preview, setPreview] = useState(false);
+  function applyFormat(format: (body: string, sel: { start: number; end: number }) => { body: string; selection: { start: number; end: number } }) {
+    const el = bodyRef.current;
+    const start = el?.selectionStart ?? draft.body.length;
+    const end = el?.selectionEnd ?? draft.body.length;
+    const next = format(draft.body, { start, end });
+    onDraftChange({ title: draft.title, body: next.body });
+    requestAnimationFrame(() => {
+      const target = bodyRef.current;
+      if (target) {
+        target.focus();
+        target.setSelectionRange(next.selection.start, next.selection.end);
+      }
+    });
+  }
   return (
     <div className="editor">
       <input
@@ -130,12 +147,23 @@ function NoteEditor({
         onChange={(e) => onDraftChange({ title: e.target.value, body: draft.body })}
         aria-label="Note title"
       />
-      <textarea
-        value={draft.body}
-        onChange={(e) => onDraftChange({ title: draft.title, body: e.target.value })}
-        rows={8}
-        aria-label="Note body"
-      />
+      <div className="row format-bar" role="toolbar" aria-label="Text formatting">
+        <button className="link" title="Bold" aria-label="Bold" onClick={() => applyFormat((body, sel) => wrapInline(body, sel, "**"))}><strong>B</strong></button>
+        <button className="link" title="Italic" aria-label="Italic" onClick={() => applyFormat((body, sel) => wrapInline(body, sel, "*"))}><em>I</em></button>
+        <button className="link" title="Bulleted list" aria-label="Bulleted list" onClick={() => applyFormat(toggleBullets)}>List</button>
+        <button className="link" aria-pressed={preview} onClick={() => setPreview((v) => !v)}>{preview ? "Edit" : "Preview"}</button>
+      </div>
+      {preview ? (
+        <div className="preview" aria-label="Note preview" dangerouslySetInnerHTML={{ __html: renderPreview(draft.body) }} />
+      ) : (
+        <textarea
+          ref={bodyRef}
+          value={draft.body}
+          onChange={(e) => onDraftChange({ title: draft.title, body: e.target.value })}
+          rows={8}
+          aria-label="Note body"
+        />
+      )}
       <div className="row between">
         <span className="save-state" data-state={saveState}>
           {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving…" : saveState === "conflict" ? "Conflict" : "Save error"}
@@ -166,7 +194,10 @@ export function SavedNotes({
 }) {
   const closed = notes.filter((n) => !openNoteIds.includes(n.id));
   const [q, setQ] = useState("");
-  const filtered = closed.filter((n) => n.title.toLowerCase().includes(q.toLowerCase()));
+  const [sort, setSort] = useState<"updated" | "created" | "title">("updated");
+  const filtered = closed
+    .filter((n) => n.title.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : sort === "created" ? (a.createdAt < b.createdAt ? 1 : -1) : (a.updatedAt < b.updatedAt ? 1 : -1));
   useEffect(() => {
     setQ("");
   }, [closed.length]);
@@ -174,7 +205,14 @@ export function SavedNotes({
   return (
     <div className="saved-notes">
       <h4>Saved notes</h4>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter saved notes" aria-label="Filter saved notes" />
+      <div className="row">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter saved notes" aria-label="Filter saved notes" />
+        <select value={sort} onChange={(e) => setSort(e.target.value as "updated" | "created" | "title")} aria-label="Sort saved notes">
+          <option value="updated">Last updated</option>
+          <option value="created">Newest first</option>
+          <option value="title">Title A–Z</option>
+        </select>
+      </div>
       <ul>
         {filtered.map((n) => (
           <li key={n.id}>

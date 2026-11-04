@@ -1,4 +1,5 @@
-import type { ActivityEvent, Checkpoint, SummaryJob } from "../../shared/contracts";
+import { useMemo, useState } from "react";
+import type { ActivityEvent, Checkpoint, QualityCode, SummaryJob, SummaryStatus } from "../../shared/contracts";
 
 function fmtTime(iso: string): string {
   try {
@@ -8,6 +9,15 @@ function fmtTime(iso: string): string {
   }
 }
 
+type SortKey = "newest" | "oldest" | "title";
+
+function summaryLabel(status: SummaryStatus | undefined): string {
+  if (status === "pending") return "summary pending";
+  if (status === "failed") return "summary failed";
+  if (status === "complete") return "summarized";
+  return "no summary";
+}
+
 export function HistoryView({
   checkpoints,
   summaries,
@@ -15,6 +25,7 @@ export function HistoryView({
   selectedId,
   onSelect,
   onDelete,
+  onDeleteMany,
   onRetry,
   aiEnabled,
 }: {
@@ -24,48 +35,209 @@ export function HistoryView({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onDeleteMany?: (ids: string[]) => void | Promise<void>;
   onRetry: (id: string) => void;
   aiEnabled: boolean;
 }) {
+  const [query, setQuery] = useState("");
+  const [quality, setQuality] = useState<"all" | QualityCode>("all");
+  const [summary, setSummary] = useState<"all" | SummaryStatus>("all");
+  const [sort, setSort] = useState<SortKey>("newest");
+  const [checked, setChecked] = useState<string[]>([]);
+  const [confirmOne, setConfirmOne] = useState<string | null>(null);
+  const [confirmMany, setConfirmMany] = useState(false);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const out = checkpoints.filter((c) => {
+      if (quality !== "all" && c.quality.code !== quality) return false;
+      if (summary !== "all" && (summaries[c.id]?.status ?? "idle") !== summary) return false;
+      if (q && !`${c.title} ${c.url}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+    out.sort((a, b) => {
+      if (sort === "title") return a.title.localeCompare(b.title);
+      if (sort === "oldest") return a.createdAt < b.createdAt ? -1 : 1;
+      return a.createdAt < b.createdAt ? 1 : -1;
+    });
+    return out;
+  }, [checkpoints, summaries, query, quality, summary, sort]);
+
+  const checkedSet = useMemo(() => new Set(checked), [checked]);
+  const visibleIds = useMemo(() => visible.map((c) => c.id), [visible]);
+  const allVisibleChecked = visible.length > 0 && visible.every((c) => checkedSet.has(c.id));
+
+  const toggle = (id: string, on: boolean) => {
+    setChecked((prev) => (on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)));
+  };
+
+  const removeIds = (ids: string[]) => {
+    setChecked((prev) => prev.filter((x) => !ids.includes(x)));
+    if (ids.includes(confirmOne ?? "")) setConfirmOne(null);
+  };
+
+  const runDeleteOne = (id: string) => {
+    onDelete(id);
+    removeIds([id]);
+    setConfirmOne(null);
+  };
+
+  const runDeleteMany = async (ids: string[]) => {
+    if (onDeleteMany) await onDeleteMany(ids);
+    else ids.forEach((id) => onDelete(id));
+    removeIds(ids);
+    setConfirmMany(false);
+  };
+
   if (checkpoints.length === 0) return <div className="empty">No checkpoints yet.</div>;
+
   return (
     <div>
       <section className="card">
         <h3>Checkpoints</h3>
         <p className="hint">Switching browser tabs jumps to that tab's checkpoint. Capture a page first to include it.</p>
-        <ul className="history">
-          {checkpoints.map((c) => {
-            const job = summaries[c.id];
-            return (
-              <li key={c.id} className={c.id === selectedId ? "selected" : ""}>
-                <button className="link" onClick={() => onSelect(c.id)}>
-                  {c.title}
+        <div className="history-toolbar">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter by title or URL"
+            aria-label="Filter checkpoints"
+          />
+          <div className="row">
+            <label className="history-select">
+              Quality{" "}
+              <select value={quality} onChange={(e) => setQuality(e.target.value as typeof quality)} aria-label="Filter by quality">
+                <option value="all">All</option>
+                <option value="complete">complete</option>
+                <option value="partial">partial</option>
+                <option value="unavailable">unavailable</option>
+              </select>
+            </label>
+            <label className="history-select">
+              Summary{" "}
+              <select value={summary} onChange={(e) => setSummary(e.target.value as typeof summary)} aria-label="Filter by summary status">
+                <option value="all">All</option>
+                <option value="idle">no summary</option>
+                <option value="pending">pending</option>
+                <option value="complete">summarized</option>
+                <option value="failed">failed</option>
+              </select>
+            </label>
+            <label className="history-select">
+              Sort{" "}
+              <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort checkpoints">
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="title">Title A–Z</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        {visible.length === 0 ? (
+          <div className="empty">
+            No checkpoints match this filter.{" "}
+            <button
+              className="link"
+              onClick={() => {
+                setQuery("");
+                setQuality("all");
+                setSummary("all");
+              }}
+            >
+              Clear filter
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="row between">
+              <span className="meta">
+                {visible.length} of {checkpoints.length} shown
+                {checked.length > 0 ? ` · ${checked.length} selected` : ""}
+              </span>
+              <span className="row">
+                <button className="link" onClick={() => setChecked(visibleIds)}>
+                  Select shown
                 </button>
-                <span className="meta">
-                  {fmtTime(c.createdAt)} · {c.quality.code}
-                  {job?.status === "pending" ? " · summary pending" : ""}
-                  {job?.status === "failed" ? " · summary failed" : ""}
-                  {job?.status === "complete" ? " · summarized" : ""}
+                <button className="link" onClick={() => setChecked([])} disabled={checked.length === 0}>
+                  Clear
+                </button>
+              </span>
+            </div>
+            {checked.length > 0 && !confirmMany && (
+              <div className="row">
+                <button className="danger" onClick={() => setConfirmMany(true)}>
+                  Trash selected ({checked.length})
+                </button>
+              </div>
+            )}
+            {confirmMany && (
+              <div className="history-confirm" role="alert">
+                <span>
+                  Delete {checked.length} checkpoint{checked.length === 1 ? "" : "s"}? Linked notes are kept.
                 </span>
                 <span className="row">
-                  {job?.status === "failed" && (
-                    <button className="link" onClick={() => onRetry(c.id)} disabled={!aiEnabled} title={!aiEnabled ? "Enable AI in Resume to retry" : undefined}>
-                      Retry
-                    </button>
-                  )}
-                  <button
-                    className="link danger"
-                    onClick={() => {
-                      if (window.confirm(`Delete checkpoint “${c.title}”? Linked notes are kept.`)) onDelete(c.id);
-                    }}
-                  >
+                  <button className="danger" onClick={() => void runDeleteMany(checked)}>
                     Delete
                   </button>
+                  <button onClick={() => setConfirmMany(false)}>Keep</button>
                 </span>
-              </li>
-            );
-          })}
-        </ul>
+              </div>
+            )}
+            <ul className="history">
+              {visible.map((c) => {
+                const job = summaries[c.id];
+                return (
+                  <li key={c.id} className={c.id === selectedId ? "selected" : ""}>
+                    <span className="history-top">
+                      <input
+                        type="checkbox"
+                        checked={checkedSet.has(c.id)}
+                        onChange={(e) => toggle(c.id, e.target.checked)}
+                        aria-label={`Select ${c.title}`}
+                      />
+                      <button className="link" onClick={() => onSelect(c.id)}>
+                        {c.title}
+                      </button>
+                    </span>
+                    <span className="meta">
+                      {fmtTime(c.createdAt)} · {c.quality.code} · {summaryLabel(job?.status)}
+                    </span>
+                    {confirmOne === c.id ? (
+                      <span className="history-confirm" role="alert">
+                        <span>Delete “{c.title}”? Notes kept.</span>
+                        <span className="row">
+                          <button className="danger" onClick={() => runDeleteOne(c.id)}>
+                            Delete
+                          </button>
+                          <button onClick={() => setConfirmOne(null)}>Keep</button>
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="row">
+                        {job?.status === "failed" && (
+                          <button className="link" onClick={() => onRetry(c.id)} disabled={!aiEnabled} title={!aiEnabled ? "Enable AI in Resume to retry" : undefined}>
+                            Retry
+                          </button>
+                        )}
+                        <button className="link danger" onClick={() => setConfirmOne(c.id)}>
+                          Trash
+                        </button>
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <label className="row history-all">
+              <input
+                type="checkbox"
+                checked={allVisibleChecked}
+                onChange={(e) => setChecked(e.target.checked ? visibleIds : [])}
+              />
+              <span className="meta">Select all shown</span>
+            </label>
+          </>
+        )}
       </section>
       <section className="card">
         <h3>Activity</h3>

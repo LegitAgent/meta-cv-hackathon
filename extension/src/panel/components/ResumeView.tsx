@@ -39,6 +39,8 @@ export function QualityBadge({ checkpoint }: { checkpoint: Checkpoint }) {
 export function ResumeView({
   checkpoint,
   job,
+  onCapture,
+  capturing,
   onSummarize,
   onCopyCode,
   onOpenSource,
@@ -50,6 +52,8 @@ export function ResumeView({
 }: {
   checkpoint: Checkpoint | null;
   job: SummaryJob | null;
+  onCapture: () => void;
+  capturing: boolean;
   onSummarize: () => void;
   onCopyCode: () => void;
   onOpenSource: () => void;
@@ -60,9 +64,23 @@ export function ResumeView({
   pasteError: string | null;
 }) {
   const [paste, setPaste] = useState("");
-  if (!checkpoint) return <div className="empty">No checkpoint yet. Click the toolbar button (“Pause here”) on any page.</div>;
+  if (!checkpoint)
+    return (
+      <section className="card">
+        <button className="primary large" onClick={onCapture} disabled={capturing}>
+          {capturing ? "Saving…" : "Save this page"}
+        </button>
+        <p className="hint">No checkpoint yet. Save the current tab to start a recap.</p>
+      </section>
+    );
   return (
     <section className="card">
+      <div className="row between">
+        <span className="saved-pill" title={fmtTime(checkpoint.createdAt)}>Saved ✓</span>
+        <button onClick={onCapture} disabled={capturing}>
+          {capturing ? "Saving…" : "Save again"}
+        </button>
+      </div>
       <h2>{checkpoint.title}</h2>
       <div className="meta">
         <span>{fmtTime(checkpoint.createdAt)}</span>

@@ -56,6 +56,17 @@ function setup(opts: { signedIn?: boolean } = {}) {
           const open = ws.openNoteIds.filter((id) => id !== message.id);
           records.workspace = { ...ws, openNoteIds: open, activeNoteId: ws.activeNoteId === message.id ? (open[open.length - 1] ?? null) : ws.activeNoteId };
           callback({ ok: true, data: { deleted: true } });
+        } else if (message.type === "CAPTURE") {
+          const cp = {
+            id: "p1", schemaVersion: 1, createdAt: "2026-02-01", taskKey: "example.com/page",
+            title: "Saved page", url: "https://example.com/page", adapter: "generic",
+            pageText: "page", selectedText: "", code: null, language: null,
+            quality: { code: "complete", missingFields: [], truncatedFields: [], warnings: [] },
+          };
+          records["checkpoint:p1"] = cp;
+          records["meta:lastCapture"] = { ok: true, at: "2026-02-01", checkpointId: "p1", code: null, message: null };
+          records.workspace = { ...(records.workspace as object), selectedCheckpointId: "p1" };
+          callback({ ok: true, data: { checkpoint: cp } });
         } else if (message.type === "WORKSPACE_UPDATE") {
           records.workspace = { ...(records.workspace as object), ...message.fields };
           callback({ ok: true, data: { workspace: records.workspace } });
@@ -152,6 +163,30 @@ it("flushes pending typing before renaming the note", async () => {
   expect((records["note:a"] as Note).body).toBe("typed body");
 });
 
+it("filters the recap note list and bulk-selects only the visible notes", async () => {
+  const { records } = setup({ signedIn: true });
+  records["note:alpha"] = { ...note("alpha"), title: "alpha plan" };
+  records["note:beta"] = { ...note("beta"), title: "beta scratch" };
+  render(<App />);
+  const filter = await screen.findByRole("textbox", { name: "Filter notes to include" });
+  const boxes = () => Array.from(document.querySelectorAll(".notes-include .check input"));
+  const checked = () => boxes().filter((b) => (b as HTMLInputElement).checked);
+  expect(boxes()).toHaveLength(3);
+  fireEvent.change(filter, { target: { value: "alpha" } });
+  expect(boxes()).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(checked()).toHaveLength(1);
+  fireEvent.change(filter, { target: { value: "beta" } });
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  fireEvent.change(filter, { target: { value: "" } });
+  expect(boxes()).toHaveLength(3);
+  expect(checked()).toHaveLength(2);
+  fireEvent.change(filter, { target: { value: "beta" } });
+  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+  fireEvent.change(filter, { target: { value: "" } });
+  expect(checked()).toHaveLength(1);
+});
+
 it("deleting a note drops its pending autosave instead of retrying it", async () => {
   const prevConfirm = window.confirm;
   window.confirm = () => true;
@@ -177,7 +212,8 @@ const checkpoint: Checkpoint = {
 };
 
 it("offers full-code paste for a partial capture", () => {
-  render(<ResumeView checkpoint={checkpoint} job={null} onSummarize={() => undefined} onCopyCode={() => undefined}
+  render(<ResumeView checkpoint={checkpoint} job={null} onCapture={() => undefined} capturing={false}
+    onSummarize={() => undefined} onCopyCode={() => undefined}
     onOpenSource={() => undefined} busy={false}
     autoSummarize={false} onAutoSummarize={() => undefined} onPasteCode={async () => true} pasteError={null} />);
   expect(screen.getByText("Captured code is partial? Paste the full code")).toBeTruthy();
@@ -211,6 +247,27 @@ it("shows the recap button once signed in", async () => {
   Object.assign(storage, { session });
   render(<App />);
   expect(await screen.findByRole("button", { name: "Generate recap" })).toBeTruthy();
+});
+
+it("captures the current tab from the in-panel button", async () => {
+  setup({ signedIn: true });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Save this page" }));
+  expect(await screen.findByText("Saved page")).toBeTruthy();
+});
+
+it("shows saved state with a save-again action when a checkpoint exists", async () => {
+  const { records } = setup({ signedIn: true });
+  records["checkpoint:c"] = { ...checkpoint };
+  records["summary:c"] = {
+    checkpointId: "c", requestId: null, status: "idle", startedAt: null,
+    includedNoteSnapshots: [], result: null, error: null, warnings: [],
+  };
+  records.workspace = { ...(records.workspace as object), selectedCheckpointId: "c" };
+  render(<App />);
+  expect(await screen.findByText("Saved ✓")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save again" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Save this page" })).toBeNull();
 });
 
 it("disables History retry while AI is disabled", () => {

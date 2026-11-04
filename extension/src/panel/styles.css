@@ -173,6 +173,16 @@ nav button.active {
   align-items: center;
 }
 
+.saved-pill {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--green);
+  border: 1px solid var(--green);
+  border-radius: 20px;
+  padding: 2px 10px;
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
 button.link {
   border: none;
   background: none;
@@ -287,6 +297,7 @@ pre.code {
   color: var(--ink);
 }
 
+select,
 textarea,
 input[type="text"],
 input:not([type]) {
@@ -300,6 +311,7 @@ input:not([type]) {
 }
 
 @media (prefers-color-scheme: light) {
+  select,
   textarea,
   input[type="text"],
   input:not([type]),
@@ -338,6 +350,41 @@ ul.history li {
 
 ul.history li.selected {
   font-weight: 700;
+}
+
+.history-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-select {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.history-top {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.history-confirm {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  align-items: center;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.history-all {
+  align-items: center;
 }
 
 .src {
@@ -458,6 +505,55 @@ details.paste-box {
   gap: 8px;
 }
 
+.wiki-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 50;
+}
+
+.wiki-dialog {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(480px, 100%);
+  max-height: min(420px, 90vh);
+  overflow: auto;
+}
+
+.wiki-dialog h3,
+.wiki-dialog h4 {
+  margin: 0;
+}
+
+.wiki-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wiki-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.wiki-table th,
+.wiki-table td {
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  text-align: left;
+}
+
 /* Wider panels: two-column resume, roomier history. */
 @container (min-width: 480px) {
   .app {
@@ -474,4 +570,28 @@ details.paste-box {
     align-items: baseline;
     gap: 12px;
   }
+}
+
+.format-bar {
+  margin-bottom: 4px;
+}
+
+.format-bar .link {
+  text-decoration: none;
+}
+
+.preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  min-height: 120px;
+}
+
+.preview p {
+  margin: 4px 0;
+}
+
+.preview ul {
+  margin: 4px 0;
+  padding-left: 20px;
 }

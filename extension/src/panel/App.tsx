@@ -18,6 +18,7 @@ import {
 import { ResumeView, SummaryCard } from "./components/ResumeView";
 import { NoteTabs, type SaveState } from "./components/NoteTabs";
 import { HistoryView } from "./components/HistoryView";
+import { WikiHelp } from "./components/WikiHelp";
 
 type View = "resume" | "notes" | "history";
 
@@ -26,9 +27,12 @@ const AUTOSAVE_MS = 400;
 export default function App() {
   const [snap, setSnap] = useState<PanelSnapshot | null>(null);
   const [view, setView] = useState<View>("resume");
+  const [showWiki, setShowWiki] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busySummary, setBusySummary] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const [includeNoteIds, setIncludeNoteIds] = useState<string[]>([]);
+  const [noteFilter, setNoteFilter] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
   const autoRanFor = useRef<string | null>(null);
 
@@ -282,11 +286,32 @@ export default function App() {
     [drainOutbox, refresh, snap?.workspace],
   );
 
+  const visibleIncludeNotes = useMemo(() => {
+    if (!snap) return [];
+    const q = noteFilter.trim().toLowerCase();
+    if (!q) return snap.notes;
+    return snap.notes.filter((n) => n.title.toLowerCase().includes(q));
+  }, [snap, noteFilter]);
+  const visibleIncludeIds = visibleIncludeNotes.map((n) => n.id);
+
   const selectedCheckpoint: Checkpoint | null = useMemo(() => {
     if (!snap) return null;
     return snap.checkpoints.find((c) => c.id === snap.workspace.selectedCheckpointId) ?? snap.checkpoints[0] ?? null;
   }, [snap]);
   const selectedJob: SummaryJob | null = (selectedCheckpoint && snap?.summaries[selectedCheckpoint.id]) || null;
+
+  // Explicit in-panel capture ("Save this page"): the only way checkpoints
+  // are created. Failures surface through the persisted lastCapture banner.
+  const captureNow = useCallback(async () => {
+    setCapturing(true);
+    try {
+      await sendCommand({ type: "CAPTURE" });
+    } catch {
+      // The worker records the outcome; the panel shows it.
+    }
+    await refresh();
+    setCapturing(false);
+  }, [refresh]);
 
   const runSummary = useCallback(
     async (checkpointId: string) => {
@@ -417,6 +442,7 @@ export default function App() {
               {v[0].toUpperCase() + v.slice(1)}
             </button>
           ))}
+          <button onClick={() => setShowWiki(true)}>Wiki</button>
         </nav>
       </header>
 
@@ -428,6 +454,8 @@ export default function App() {
             </div>
           )}
           <ResumeView
+            onCapture={() => void captureNow()}
+            capturing={capturing}
             checkpoint={selectedCheckpoint}
             job={selectedJob}
             busy={busySummary}
@@ -444,11 +472,40 @@ export default function App() {
             pasteError={pasteError}
           />
           <SummaryCard job={selectedJob} />
-          <section className="card">
+          <section className="card notes-include">
             <h3>Notes to include</h3>
             <p className="hint">Linking a note does not include it automatically. Select notes explicitly.</p>
             {snap.notes.length === 0 && <div className="empty">No notes yet.</div>}
-            {snap.notes.map((n) => (
+            {snap.notes.length > 0 && (
+              <>
+                <div className="row">
+                  <input
+                    value={noteFilter}
+                    onChange={(e) => setNoteFilter(e.target.value)}
+                    placeholder="Filter notes by title"
+                    aria-label="Filter notes to include"
+                  />
+                </div>
+                <div className="row">
+                  <button
+                    onClick={() => setIncludeNoteIds((ids) => Array.from(new Set([...ids, ...visibleIncludeIds])))}
+                    disabled={visibleIncludeIds.length === 0}
+                    title="Select all filtered notes"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    onClick={() => setIncludeNoteIds((ids) => ids.filter((id) => !visibleIncludeIds.includes(id)))}
+                    disabled={visibleIncludeIds.length === 0}
+                    title="Clear filtered notes"
+                  >
+                    Clear
+                  </button>
+                  <span className="meta">{includeNoteIds.length} of {snap.notes.length} selected</span>
+                </div>
+              </>
+            )}
+            {visibleIncludeNotes.map((n) => (
               <label key={n.id} className="check">
                 <input
                   type="checkbox"
@@ -460,6 +517,9 @@ export default function App() {
                 {n.title} (rev {n.revision})
               </label>
             ))}
+            {visibleIncludeNotes.length === 0 && snap.notes.length > 0 && (
+              <div className="empty">No notes match this filter.</div>
+            )}
             {selectedJob && selectedJob.warnings.length > 0 && (
               <div className="warning" role="note">
                 <strong>Recap warnings for this checkpoint:</strong>
@@ -554,11 +614,18 @@ export default function App() {
             await sendCommand({ type: "CHECKPOINT_DELETE", id });
             await refresh();
           }}
+          onDeleteMany={async (ids) => {
+            for (const id of ids) {
+              await sendCommand({ type: "CHECKPOINT_DELETE", id });
+            }
+            await refresh();
+          }}
           onRetry={(id) => void runSummary(id)}
           aiEnabled={aiEnabled}
         />
       )}
 
+      <WikiHelp open={showWiki} onClose={() => setShowWiki(false)} />
       <AccountSettings onAuthChange={() => { void refreshCredential(); void refresh(); }} />
       <footer>
         <button className="link" onClick={() => void exportJson()}>
