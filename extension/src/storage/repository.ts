@@ -15,6 +15,7 @@ import {
   type SummaryJob,
   type Workspace,
 } from "../shared/contracts";
+import { BACKEND_URL } from "../shared/config";
 
 export interface AsyncStorageArea {
   get(keys: string[] | null): Promise<Record<string, unknown>>;
@@ -34,7 +35,7 @@ export function defaultWorkspace(): Workspace {
     selectedCheckpointId: null,
     aiEnabled: false,
     autoSummarize: false,
-    backendUrl: "http://127.0.0.1:8001",
+    backendUrl: BACKEND_URL,
   };
 }
 
@@ -187,7 +188,7 @@ export class Repository {
   async getWorkspace(): Promise<Workspace> {
     const got = await this.area.get(["workspace"]);
     const ws = got["workspace"] as Partial<Workspace> | undefined;
-    return { ...defaultWorkspace(), ...(ws ?? {}) };
+    return { ...defaultWorkspace(), ...(ws ?? {}), backendUrl: BACKEND_URL };
   }
 
   updateWorkspace(fields: Partial<Workspace>): Promise<Workspace> {
@@ -199,7 +200,6 @@ export class Repository {
       if (fields.selectedCheckpointId !== undefined) allowed.selectedCheckpointId = fields.selectedCheckpointId;
       if (fields.aiEnabled !== undefined) allowed.aiEnabled = fields.aiEnabled;
       if (fields.autoSummarize !== undefined) allowed.autoSummarize = fields.autoSummarize;
-      if (fields.backendUrl !== undefined) allowed.backendUrl = fields.backendUrl.slice(0, 200);
       const next = { ...ws, ...allowed };
       await this.area.set({ workspace: next });
       return next;

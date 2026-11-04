@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Checkpoint, Note, SummaryJob } from "../shared/contracts";
 import { postSummary } from "./api";
-import { ConnectionSettings } from "./components/ConnectionSettings";
+import { AccountSettings } from "./components/AccountSettings";
+import { BACKEND_URL } from "../shared/config";
 import {
   mergeSavedNote,
   resolveAdoptedDraft,
@@ -223,9 +224,8 @@ export default function App() {
           job: SummaryJob;
           payload: Parameters<typeof postSummary>[1];
         }>({ type: "SUMMARY_BEGIN", checkpointId, noteIds: includeNoteIds });
-        const backendUrl = snap?.workspace.backendUrl ?? "http://127.0.0.1:8001";
         try {
-          const res = await postSummary(backendUrl, payload);
+          const res = await postSummary(BACKEND_URL, payload);
           await sendCommand({ type: "SUMMARY_COMPLETE", checkpointId, requestId: res.requestId, result: res.summary });
         } catch (e) {
           const code = (e as Error & { code?: string }).code ?? "SUMMARY_FAILED";
@@ -241,7 +241,7 @@ export default function App() {
         await refresh();
       }
     },
-    [busySummary, aiEnabled, includeNoteIds, refresh, snap?.workspace.backendUrl],
+    [busySummary, aiEnabled, includeNoteIds, refresh],
   );
 
   const setAiEnabled = useCallback(
@@ -458,12 +458,12 @@ export default function App() {
         />
       )}
 
-      <ConnectionSettings backendUrl={snap.workspace.backendUrl} onSaved={refresh} />
+      <AccountSettings />
       <footer>
         <button className="link" onClick={() => void exportJson()}>
           Export JSON
         </button>
-        <span className="meta">Notes saved locally · backend {snap.workspace.backendUrl}</span>
+        <span className="meta">Notes saved on this device</span>
       </footer>
     </div>
   );

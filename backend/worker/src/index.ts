@@ -1,8 +1,8 @@
-import { requestSchema, summarySchema, type SummaryInput } from "./schemas";
+import { requestSchema, summarySchema, summaryResponseFormat, type SummaryInput } from "./schemas";
+import { AuthError, exchangeGoogleCode, verifyGoogleToken, type AuthEnv } from "./auth";
 
-export interface Env {
+export interface Env extends AuthEnv {
   AI_API_KEY: string;
-  BACKTRACK_ACCESS_TOKEN: string;
   AI_BASE_URL: string;
   AI_MODEL: string;
   ALLOWED_EXTENSION_ORIGINS: string;
@@ -53,10 +53,13 @@ async function infer(env: Env, input: SummaryInput) {
   const timer = setTimeout(() => controller.abort(), 35000);
   try {
     const response = await fetch(`${env.AI_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST", redirect: "error", signal: controller.signal,
+      // Do not follow redirects carrying the provider credential.
+      method: "POST", redirect: "manual", signal: controller.signal,
       headers: { Authorization: `Bearer ${env.AI_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: env.AI_MODEL, temperature: 0.2, max_tokens: 1200,
+        // Muse counts reasoning and visible JSON against the same output budget.
+        model: env.AI_MODEL, temperature: 0.2, max_tokens: 4096, reasoning_effort: "low",
+        response_format: summaryResponseFormat,
         messages: [{ role: "system", content: PROMPT }, { role: "user", content: JSON.stringify(promptInput(input)) }],
       }),
     });
@@ -65,14 +68,24 @@ async function infer(env: Env, input: SummaryInput) {
       if (response.status === 429) throw new ApiError(429, "RATE_LIMITED", "Provider is busy. Retry later.", true);
       throw new ApiError(502, "PROVIDER_ERROR", "The model provider could not complete the request.", true);
     }
-    let content: unknown;
+    let envelope;
     try {
-      const envelope = JSON.parse(await readBounded(response.body, BODY_LIMIT));
-      content = JSON.parse(envelope.choices[0].message.content);
+      envelope = JSON.parse(await readBounded(response.body, BODY_LIMIT));
     } catch (e) {
       if (controller.signal.aborted) throw e;
-      throw new ApiError(502, "MODEL_OUTPUT_INVALID", "Model returned invalid output. Retry the request.", true);
+      throw new ApiError(502, "MODEL_OUTPUT_INVALID", "The model provider returned an unreadable response.", true);
     }
+    const choice = envelope?.choices?.[0];
+    if (choice?.finish_reason === "length")
+      throw new ApiError(502, "MODEL_OUTPUT_TRUNCATED", "Muse reached its output limit before completing the recap. Try a smaller checkpoint or fewer notes.", true);
+    if (choice?.finish_reason === "content_filter" || choice?.message?.refusal)
+      throw new ApiError(502, "MODEL_REFUSED", "Muse declined to summarize this content. Try a different checkpoint.");
+    const text = choice?.message?.content;
+    if (typeof text !== "string" || !text.trim())
+      throw new ApiError(502, "MODEL_OUTPUT_INVALID", "Muse returned no summary text. Retry the request.", true);
+    let content: unknown;
+    try { content = JSON.parse(text); }
+    catch { throw new ApiError(502, "MODEL_OUTPUT_INVALID", "Muse did not return the requested JSON summary. Retry the request.", true); }
     const parsed = summarySchema.safeParse(content);
     if (!parsed.success) throw new ApiError(502, "MODEL_OUTPUT_INVALID", "Model output failed validation.", true);
     return parsed.data;
@@ -98,6 +111,19 @@ export function createHandler(cache: Pick<Cache, "match" | "put">) {
         response = new Response(null, { status: 204 });
       } else if (path === "/health" && request.method === "GET") {
         response = json({ status: "ok", providerConfigured: Boolean(env.AI_API_KEY && env.AI_BASE_URL && env.AI_MODEL) });
+      } else if (path === "/auth/config" && request.method === "GET") {
+        if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET)
+          throw new ApiError(503, "AUTH_NOT_CONFIGURED", "Google sign-in is not configured.");
+        response = json({ clientId: env.GOOGLE_CLIENT_ID });
+      } else if (path === "/auth/google" && request.method === "POST") {
+        if (!(await env.IP_LIMITER.limit({ key: await digest(request.headers.get("CF-Connecting-IP") || "local") })).success)
+          throw new ApiError(429, "RATE_LIMITED", "Too many sign-in attempts. Retry in a minute.", true);
+        if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json")
+          throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Send application/json.");
+        let body: unknown;
+        const text = await readBounded(request.body, 8192);
+        try { body = JSON.parse(text); } catch { throw new ApiError(400, "INVALID_AUTH_REQUEST", "Invalid sign-in request."); }
+        response = json(await exchangeGoogleCode(body, env));
       } else if (path !== "/api/v1/summaries") {
         throw new ApiError(404, "NOT_FOUND", "Route not found.");
       } else if (request.method !== "POST") {
@@ -107,12 +133,10 @@ export function createHandler(cache: Pick<Cache, "match" | "put">) {
         const ip = request.headers.get("CF-Connecting-IP") || "local";
         if (!(await env.IP_LIMITER.limit({ key: await digest(ip) })).success)
           throw new ApiError(429, "RATE_LIMITED", "Too many requests. Retry in a minute.", true);
-        if (!env.BACKTRACK_ACCESS_TOKEN || env.BACKTRACK_ACCESS_TOKEN.length < 32)
-          throw new ApiError(503, "AUTH_NOT_CONFIGURED", "Backend access token is not configured.");
         const token = request.headers.get("Authorization")?.replace(/^Bearer /, "") || "";
-        if (token.length > 512 || await digest(token) !== await digest(env.BACKTRACK_ACCESS_TOKEN))
-          throw new ApiError(401, "UNAUTHORIZED", "Set the backend access token in Connection settings.");
-        const principal = await digest(token);
+        if (token.length > 8192) throw new ApiError(401, "UNAUTHORIZED", "Sign in with Google again.");
+        const identity = await verifyGoogleToken(token, env);
+        const principal = await digest(identity.sub);
         if (!(await env.TOKEN_LIMITER.limit({ key: principal })).success)
           throw new ApiError(429, "RATE_LIMITED", "Summary limit reached. Retry in a minute.", true);
         if (request.headers.get("Content-Type")?.split(";")[0].trim() !== "application/json")
@@ -153,7 +177,9 @@ export function createHandler(cache: Pick<Cache, "match" | "put">) {
         response.headers.set("X-Backtrack-Cache", hit ? "HIT" : "MISS");
       }
     } catch (e) {
-      const error = e instanceof ApiError ? e : new ApiError(503, "SERVICE_UNAVAILABLE", "Service temporarily unavailable.", true);
+      const error = e instanceof ApiError ? e : e instanceof AuthError
+        ? new ApiError(e.status, e.code, e.message)
+        : new ApiError(503, "SERVICE_UNAVAILABLE", "Service temporarily unavailable.", true);
       response = json({ error: { code: error.code, message: error.message, retryable: error.retryable } }, error.status);
       if (error.status === 429) response.headers.set("Retry-After", "60");
       if (error.status === 405) response.headers.set("Allow", "POST, OPTIONS");

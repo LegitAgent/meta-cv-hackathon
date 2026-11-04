@@ -1,13 +1,21 @@
 {
+  "routes": [
+    {
+      "pattern": "backtrack.martinalba.dev",
+      "custom_domain": true
+    }
+  ],
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "backtrack-api",
   "main": "src/entry.ts",
   "compatibility_date": "2026-11-01",
+  "preview_urls": false,
+  "workers_dev": false,
   "vars": {
-    // Set these from the direct Muse API documentation before deployment.
-    "AI_BASE_URL": "",
-    "AI_MODEL": "",
-    "ALLOWED_EXTENSION_ORIGINS": "",
+    "GOOGLE_CLIENT_ID": "485394566822-r69tpao69h53eni3ddqb6cm1ao0qfgnl.apps.googleusercontent.com",
+    "AI_BASE_URL": "https://api.meta.ai/v1",
+    "AI_MODEL": "muse-spark-1.3",
+    "ALLOWED_EXTENSION_ORIGINS": "chrome-extension://icmegjccphakockngdmbdbkfehdpfcfa",
     "CACHE_TTL_SECONDS": "300"
   },
   "ratelimits": [

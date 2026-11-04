@@ -4,6 +4,7 @@
 
 import { backendSummaryResponseSchema, type BackendSummaryResponse } from "../shared/validation";
 import type { SummaryRequestPayload } from "../shared/contracts";
+import { getCredential } from "./auth";
 
 export const PANEL_FETCH_TIMEOUT_MS = 45_000;
 
@@ -18,9 +19,9 @@ export async function postSummary(
   const onExternalAbort = () => controller.abort(opts?.signal?.reason ?? new Error("ABORTED"));
   opts?.signal?.addEventListener("abort", onExternalAbort, { once: true });
   try {
-    const { backendCredential } = await chrome.storage.session.get("backendCredential");
-    const authorization: Record<string, string> = backendCredential?.origin === new URL(backendUrl).origin && backendCredential?.token
-      ? { Authorization: `Bearer ${backendCredential.token}` } : {};
+    const credential = await getCredential(new URL(backendUrl).origin);
+    if (!credential) throw Object.assign(new Error("Sign in with Google under Account to generate a recap."), { code: "UNAUTHORIZED" });
+    const authorization = { Authorization: `Bearer ${credential.token}` };
     const res = await fetch(`${backendUrl.replace(/\/$/, "")}/api/v1/summaries`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authorization },

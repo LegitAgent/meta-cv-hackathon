@@ -45,26 +45,20 @@ Edit `.dev.vars` with these values:
 AI_API_KEY="your-muse-api-key"
 AI_BASE_URL="your-verified-muse-api-base-url"
 AI_MODEL="your-direct-muse-model-id"
-BACKTRACK_ACCESS_TOKEN="your-random-token-at-least-32-characters"
+GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
 ALLOWED_EXTENSION_ORIGINS="chrome-extension://your-extension-id"
 ```
 
-Generate a random token locally, for example:
-
-```powershell
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-```
-
-This token protects your demo backend. It is separate from your Muse API key. Do not commit `.dev.vars` or paste real keys into chat.
-
-The endpoint and model are intentionally unset until direct Muse API compatibility is verified. The current client expects Bearer authentication, appends `/chat/completions` to AI_BASE_URL, and reads an OpenAI-compatible response. If the direct API differs, its adapter needs updating before use.
+Set up a Google OAuth Web application client using [the Google sign-in guide](docs/google-sign-in.md). Only verified `@gmail.com` accounts can use AI. Keep `.dev.vars` private. The backend expects Bearer authentication from the direct Muse API and appends `/chat/completions` to AI_BASE_URL.
 
 The nonsecret settings are in `backend/worker/wrangler.jsonc`:
 
 | Variable | Value / purpose |
 | --- | --- |
-| AI_BASE_URL | Set to the direct Muse API base URL; currently unset |
-| AI_MODEL | Set to the model identifier supplied by the direct Muse API; currently unset |
+| AI_BASE_URL | `https://api.meta.ai/v1` |
+| AI_MODEL | `muse-spark-1.3` |
+| GOOGLE_CLIENT_ID | Your Google OAuth Web application client ID (public) |
 | ALLOWED_EXTENSION_ORIGINS | Comma-separated exact extension origins; set your actual ID locally and before deployment |
 | CACHE_TTL_SECONDS | `300`; set `0` to disable caching |
 
@@ -74,16 +68,13 @@ Start the Worker:
 npm run dev
 ```
 
-Keep the terminal open. `http://127.0.0.1:8001/health` returns service status. `providerConfigured: true` indicates configuration is present, not that the direct Muse API has accepted the key or model.
+Keep the terminal open. `http://127.0.0.1:8001/health` returns service status locally (`https://backtrack.martinalba.dev/health` once deployed). `providerConfigured: true` indicates configuration is present, not that the direct Muse API has accepted the key or model.
 
 **3. Connect Backtrack**
 
-Open a webpage, click Backtrack, and expand Connection settings:
+Open a webpage, click Backtrack, expand **Account**, and click **Sign in with Google**. Choose a Gmail account, enable AI, and generate a recap. Backtrack automatically connects to `https://backtrack.martinalba.dev`; users do not configure a backend URL. Your short-lived Google identity token stays in Chrome session storage. Sign in again after it expires or Chrome restarts. Never enter your Muse API key in the extension.
 
-- Backend URL: `http://127.0.0.1:8001`
-- Backend access token: the same value as BACKTRACK_ACCESS_TOKEN
-
-Save the connection, enable AI, and generate a recap. The access token stays in Chrome session storage and must be re-entered after Chrome restarts. Never enter your Muse API key in the extension.
+The local Worker can still be tested directly at `http://127.0.0.1:8001`. The extension targets the hosted backend; testing it against a different origin requires a developer source change in `extension/src/shared/config.ts` and the matching manifest host permission, followed by a rebuild.
 
 After extension changes, run `npm run build` in `extension`, click Reload on its Chrome extension card, and reopen the panel.
 
@@ -94,16 +85,16 @@ From `backend/worker`, set AI_BASE_URL and AI_MODEL in `wrangler.jsonc` using th
 ```powershell
 npx wrangler login
 npx wrangler secret put AI_API_KEY
-npx wrangler secret put BACKTRACK_ACCESS_TOKEN
+npx wrangler secret put GOOGLE_CLIENT_SECRET
 npm run build
 npm run deploy
 ```
 
-Wrangler prompts for each secret. Enter your direct Muse API key and the same demo access token you will use in Chrome. Local `.dev.vars` values are not uploaded automatically.
+Set GOOGLE_CLIENT_ID in wrangler.jsonc before deployment. Wrangler prompts for the Muse API key and Google client secret. Local `.dev.vars` values are not uploaded automatically. BACKTRACK_ACCESS_TOKEN is no longer used.
 
-Copy the deployed HTTPS Worker URL into Backtrack's Connection settings, enter the token, and grant Chrome access to that specific origin when prompted. No Cloudflare KV, database, or R2 bucket is required. Rate-limit bindings are declared in `wrangler.jsonc`; use distinct namespace IDs if you already use these IDs elsewhere in your account.
+Connect the deployed Worker to `backtrack.martinalba.dev`, then sign in through the extension's **Account** section. No Cloudflare KV, database, or R2 bucket is required. Rate-limit bindings are declared in `wrangler.jsonc`; use distinct namespace IDs if you already use these IDs elsewhere in your account.
 
-Defaults: 30 summary requests/minute per IP and 10/minute per access token, including cache hits. Exceeding them returns 429 with Retry-After. Cloudflare limits are approximate and per edge location, not a global billing cap. Cache entries are also local to an edge location; concurrent misses may make separate provider calls. Configure provider spending limits separately. A shared access token is intended for a private hackathon demo; public distribution should use per-user authentication and quotas.
+Defaults: 30 summary requests/minute per IP and 10/minute per Google account, including cache hits. Exceeding them returns 429 with Retry-After. Cloudflare limits are approximate and per edge location, not a global billing cap. Cache entries are also local to an edge location; concurrent misses may make separate provider calls. Configure provider spending limits separately. All verified Gmail accounts accepted by your Google OAuth app can request recaps; sign-in does not restrict access to an owner-only list.
 
 Request bodies are capped at 256 KiB, provider responses are validated, and failed responses are not cached. Cache keys include the access identity, model, prompt, and content. Client responses use no-store. The Worker does not log note bodies, code, or keys.
 
@@ -119,11 +110,11 @@ npm test
 npm run build
 ```
 
-- 401: save the correct backend access token in Connection settings.
-- 403: check the extension ID in ALLOWED_EXTENSION_ORIGINS.
+- 401: sign in with Google again under Account.
+- 403: use a verified Gmail account and check the extension ID in ALLOWED_EXTENSION_ORIGINS.
 - 429: wait for the rate-limit window; avoid repeated retries.
 - 503: check Worker secrets and provider configuration.
 - 502: check the direct Muse API model access, account credits, and API key; errors are sanitized.
-- No network connection: confirm the local Worker is running or grant permission for the hosted URL.
+- No network connection: confirm the deployed Worker and its custom domain are reachable.
 
 Implementation references: [Cloudflare rate limits](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/), [Cloudflare Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/).

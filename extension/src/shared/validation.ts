@@ -99,7 +99,6 @@ export const workerCommandSchema = z.discriminatedUnion("type", [
         selectedCheckpointId: z.string().nullable().optional(),
         aiEnabled: z.boolean().optional(),
         autoSummarize: z.boolean().optional(),
-        backendUrl: z.string().max(200).optional(),
       })
       .strict(),
   }),

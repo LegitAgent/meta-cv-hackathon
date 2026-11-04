@@ -90,7 +90,7 @@ Initial development manifest:
   "version": "0.1.0",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
-  "host_permissions": ["http://127.0.0.1/*"],
+  "host_permissions": ["https://backtrack.martinalba.dev/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "Pause here" },
   "side_panel": { "default_path": "panel.html" }
@@ -244,7 +244,7 @@ AI input selection must be explicit for notes. Linking a note to a checkpoint do
 
 ## 9. Backend API
 
-Run a separate service on 127.0.0.1:8001 for the demo. It stores no notes or checkpoint database.
+Run the backend at the fixed URL https://backtrack.martinalba.dev (local Worker dev on 127.0.0.1:8001). It stores no notes or checkpoint database.
 
 ### GET /health
 

@@ -23,3 +23,12 @@ export const summarySchema = z.object({
   nextAction: z.string().min(1).max(600), uncertainties: boundedList,
 });
 export type SummaryInput = z.infer<typeof requestSchema>;
+
+// Generate the provider contract from the same schema used to validate responses.
+export const summaryResponseFormat = {
+  type: "json_schema",
+  json_schema: {
+    name: "backtrack_summary", strict: true,
+    schema: z.toJSONSchema(summarySchema, { io: "output", target: "draft-7" }),
+  },
+};

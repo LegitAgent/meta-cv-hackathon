@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BODY_LIMIT, createHandler, type Env } from "../src/index";
+import { summaryResponseFormat } from "../src/schemas";
+
+vi.mock("../src/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/auth")>();
+  return { ...actual, verifyGoogleToken: vi.fn(async (token: string, env: Env) => {
+    if (!env.GOOGLE_CLIENT_ID) throw new actual.AuthError(503, "AUTH_NOT_CONFIGURED", "Not configured");
+    if (token !== "a".repeat(40) && token !== "b".repeat(40)) throw new actual.AuthError(401, "UNAUTHORIZED", "Sign in");
+    return { sub: token, email: "test@gmail.com", expiresAt: Date.now() + 3600000 };
+  }) };
+});
 
 const token = "a".repeat(40);
 const summary = { recap: "Saved attempt", observedFacts: [], possibleBlocker: null, nextAction: "Trace one input", uncertainties: [] };
@@ -11,7 +21,7 @@ function setup() {
     put: vi.fn(async (r: Request, response: Response) => { stored.set(r.url, response.clone()); }),
   };
   const env: Env = {
-    AI_API_KEY: "provider-secret", BACKTRACK_ACCESS_TOKEN: token,
+    AI_API_KEY: "provider-secret", GOOGLE_CLIENT_ID: "client.apps.googleusercontent.com", GOOGLE_CLIENT_SECRET: "test-secret",
     AI_BASE_URL: "https://provider.example/v1", AI_MODEL: "muse-test",
     ALLOWED_EXTENSION_ORIGINS: "chrome-extension://test", CACHE_TTL_SECONDS: "300",
     IP_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
@@ -29,13 +39,55 @@ function setup() {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe("Worker gateway", () => {
+  it("requests a complete structured summary with a reasoning-aware output budget", async () => {
+    const t = setup();
+    expect((await t.send()).status).toBe(200);
+    const body = JSON.parse(t.fetcher.mock.calls[0][1].body);
+    expect(body).toMatchObject({ response_format: summaryResponseFormat, max_tokens: 4096, reasoning_effort: "low" });
+    const schema = body.response_format.json_schema.schema;
+    expect(schema.required).toEqual(expect.arrayContaining(["recap", "observedFacts", "possibleBlocker", "nextAction", "uncertainties"]));
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties.observedFacts.items.additionalProperties).toBe(false);
+  });
+  it.each(["", JSON.stringify(summary)])("rejects truncated output even when its content parses", async content => {
+    const t = setup();
+    t.fetcher.mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: "length", message: { content } }] })));
+    const response = await t.send();
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: { code: "MODEL_OUTPUT_TRUNCATED" } });
+    expect(t.cache.put).not.toHaveBeenCalled(); expect(t.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { finish_reason: "content_filter", message: { content: null } },
+    { finish_reason: "stop", message: { content: null, refusal: "private refusal text" } },
+  ])("reports refusals without leaking provider text", async choice => {
+    const t = setup(); t.fetcher.mockResolvedValue(new Response(JSON.stringify({ choices: [choice] })));
+    const response = await t.send();
+    expect(await response.json()).toMatchObject({ error: { code: "MODEL_REFUSED", retryable: false } });
+    expect(t.cache.put).not.toHaveBeenCalled();
+  });
+  it.each([null, "", "```json\n{}\n```", "{\"recap\":", {}])("rejects missing or malformed summary content: %j", async content => {
+    const t = setup(); t.fetcher.mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content } }] })));
+    expect((await t.send()).status).toBe(502); expect(t.cache.put).not.toHaveBeenCalled();
+  });
+  it("rejects provider redirects without forwarding credentials", async () => {
+    const t = setup();
+    t.fetcher.mockImplementation(async (_url, options) => {
+      if (options.redirect === "error") throw new TypeError("Invalid redirect value");
+      return new Response(null, { status: 302, headers: { Location: "https://other.example/" } });
+    });
+    expect((await t.send()).status).toBe(502);
+    expect(t.fetcher).toHaveBeenCalledTimes(1);
+    expect(t.fetcher.mock.calls[0][1].redirect).toBe("manual");
+    expect(t.cache.put).not.toHaveBeenCalled();
+  });
   it("requires authentication before inference or cache access", async () => {
     const t = setup();
     expect((await t.send(input(), { Authorization: "Bearer wrong" })).status).toBe(401);
     expect(t.fetcher).not.toHaveBeenCalled(); expect(t.cache.match).not.toHaveBeenCalled();
   });
   it("fails closed when auth is not configured", async () => {
-    const t = setup(); t.env.BACKTRACK_ACCESS_TOKEN = "";
+    const t = setup(); t.env.GOOGLE_CLIENT_ID = "";
     expect((await t.send()).status).toBe(503); expect(t.fetcher).not.toHaveBeenCalled();
   });
   it("rejects unapproved origins and provides allowed preflight", async () => {
@@ -72,10 +124,10 @@ describe("Worker gateway", () => {
   it("isolates caches after credential, model or content changes", async () => {
     const t = setup(); await t.send(); await Promise.all(t.tasks);
     t.env.AI_MODEL = "different"; await t.send(); await Promise.all(t.tasks);
-    t.env.BACKTRACK_ACCESS_TOKEN = "b".repeat(40); await t.send(input(), { Authorization: `Bearer ${t.env.BACKTRACK_ACCESS_TOKEN}` });
+    const secondToken = "b".repeat(40); await t.send(input(), { Authorization: `Bearer ${secondToken}` });
     await Promise.all(t.tasks);
     const changed = input(); changed.checkpoint.code = "x = 2";
-    await t.send(changed, { Authorization: `Bearer ${t.env.BACKTRACK_ACCESS_TOKEN}` });
+    await t.send(changed, { Authorization: `Bearer ${secondToken}` });
     expect(t.fetcher).toHaveBeenCalledTimes(4);
   });
   it("does not cache invalid model output or provider errors", async () => {

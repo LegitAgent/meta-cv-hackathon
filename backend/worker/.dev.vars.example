@@ -1,10 +1,8 @@
 # Copy to .dev.vars. Never commit real values.
-# Direct Muse API credentials. Endpoint/model must be verified with its docs.
 AI_API_KEY="your-muse-api-key"
-AI_BASE_URL=""
-AI_MODEL=""
-# Generate a random value; enter this SAME value in the extension settings.
-# This is a demo access credential, NOT the provider API key.
-BACKTRACK_ACCESS_TOKEN="replace-with-at-least-32-random-characters"
-# Copy your ID from chrome://extensions after loading extension/dist.
-ALLOWED_EXTENSION_ORIGINS="chrome-extension://your-extension-id"
+AI_BASE_URL="https://api.meta.ai/v1"
+AI_MODEL="muse-spark-1.3"
+# Google OAuth client type: Web application. The client ID is public.
+GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
+ALLOWED_EXTENSION_ORIGINS="chrome-extension://icmegjccphakockngdmbdbkfehdpfcfa"

@@ -96,7 +96,8 @@ export function mergeSavedNote(
   return { id: serverNote.id, title: pending.title, body: pending.body, baseRevision: serverNote.revision };
 }
 
-export const DEFAULT_BACKEND_URL = "http://127.0.0.1:8001";
+import { BACKEND_URL } from "../shared/config";
+export const DEFAULT_BACKEND_URL = BACKEND_URL;
 
 export function snapshotFromStorage(all: Record<string, unknown>): PanelSnapshot {
   const workspace = {
@@ -105,8 +106,8 @@ export function snapshotFromStorage(all: Record<string, unknown>): PanelSnapshot
     selectedCheckpointId: null,
     aiEnabled: false,
     autoSummarize: false,
-    backendUrl: DEFAULT_BACKEND_URL,
     ...((all["workspace"] as Record<string, unknown>) ?? {}),
+    backendUrl: DEFAULT_BACKEND_URL,
   } as Workspace;
   const checkpoints: Checkpoint[] = [];
   const notes: Note[] = [];
