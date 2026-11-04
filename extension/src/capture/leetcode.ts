@@ -78,8 +78,8 @@ export function buildLeetCodeOutcome(
   const missing = [...raw.missingFields];
   const warnings = [...raw.warnings];
   if (!raw.pageTextFromProblem) missing.push("problemStatement");
-  else if (raw.code === null) missing.push("code");
-  if (raw.codePartial) warnings.push("Editor lines may be virtualized; code snapshot labeled partial.");
+  if (raw.code === null) missing.push("code");
+  if (raw.codePartial && raw.code !== null) warnings.push("Editor lines may be virtualized; code snapshot labeled partial.");
   const pageText = raw.pageTextFromProblem ?? raw.pageText;
   const page = cap(pageText, 20000);
   const sel = cap(raw.selectedText, 5000);

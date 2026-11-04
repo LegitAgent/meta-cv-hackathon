@@ -5,7 +5,7 @@
 
 import type { AsyncStorageArea } from "./repository";
 import { defaultSummaryJob, defaultWorkspace } from "./repository";
-import type { Checkpoint, Note, SummaryJob } from "../shared/contracts";
+import type { ActivityEvent, Checkpoint, Note, SummaryJob } from "../shared/contracts";
 
 export const SCHEMA_VERSION = 1 as const;
 export const STALE_PENDING_MS = 60_000;
@@ -23,6 +23,7 @@ export interface ReconcileReport {
   orphanNoteIds: string[];
   orphanCheckpointIds: string[];
   interruptedJobs: string[];
+  prunedEventIds: string[];
 }
 
 export async function reconcileOnStartup(area: AsyncStorageArea): Promise<ReconcileReport> {
@@ -33,6 +34,7 @@ export async function reconcileOnStartup(area: AsyncStorageArea): Promise<Reconc
     orphanNoteIds: [],
     orphanCheckpointIds: [],
     interruptedJobs: [],
+    prunedEventIds: [],
   };
   const checkpoints = new Set<string>();
   const notes = new Set<string>();
@@ -103,5 +105,18 @@ export async function reconcileOnStartup(area: AsyncStorageArea): Promise<Reconc
     }
   }
   if (Object.keys(missingJobs).length > 0) await area.set(missingJobs);
+
+  // Activity events are append-only: cap them so long-lived profiles do not
+  // press against the chrome.storage.local quota.
+  const MAX_RETAINED_EVENTS = 200;
+  const eventEntries = Object.keys(all)
+    .filter((key) => key.startsWith("event:"))
+    .map((key) => ({ key, ts: Date.parse((all[key] as ActivityEvent | undefined)?.timestamp ?? "") || 0 }));
+  if (eventEntries.length > MAX_RETAINED_EVENTS) {
+    eventEntries.sort((a, b) => b.ts - a.ts);
+    const drop = eventEntries.slice(MAX_RETAINED_EVENTS).map((e) => e.key);
+    await area.remove(drop);
+    report.prunedEventIds.push(...drop.map((key) => key.slice("event:".length)));
+  }
   return report;
 }

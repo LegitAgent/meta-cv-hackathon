@@ -67,6 +67,25 @@ describe("capture adapters", () => {
     expect(out.quality.warnings.join(" ")).toMatch(/virtualized/i);
   });
 
+  it("reports every missing field and skips the virtualized warning when nothing was read", () => {
+    const out = buildLeetCodeOutcome({
+      title: "Two Sum",
+      url: "https://leetcode.com/problems/two-sum/",
+      selectedText: "",
+      pageText: "",
+      pageTextFromProblem: null,
+      code: null,
+      language: null,
+      codePartial: true,
+      missingFields: [],
+      truncatedFields: [],
+      warnings: [],
+    });
+    expect(out.quality.missingFields).toContain("problemStatement");
+    expect(out.quality.missingFields).toContain("code");
+    expect(out.quality.warnings.join(" ")).not.toMatch(/virtualized/i);
+  });
+
   it("navigation mismatch is detectable via task keys", () => {
     expect(taskKeyForUrl("https://a.com/p/1?x=1#y")).toBe(taskKeyForUrl("https://a.com/p/1"));
     expect(taskKeyForUrl("https://a.com/p/1")).not.toBe(taskKeyForUrl("https://a.com/p/2"));

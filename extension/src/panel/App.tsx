@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Checkpoint, Note, SummaryJob } from "../shared/contracts";
 import { postSummary } from "./api";
 import { AccountSettings } from "./components/AccountSettings";
+import { SignInPage } from "./components/SignInPage";
+import { signIn, useCredential } from "./auth";
 import { BACKEND_URL } from "../shared/config";
 import {
   mergeSavedNote,
@@ -47,6 +49,9 @@ export default function App() {
   const outbox = useRef(new Map<string, PendingEdit>());
   const inFlightSave = useRef<Promise<boolean> | null>(null);
   const conflictedNoteId = useRef<string | null>(null);
+  // Notes deleted in this session: late saves for them are dropped instead of
+  // redisplayed, so a queued autosave cannot resurrect a deleted note.
+  const deletedNoteIds = useRef(new Set<string>());
   // Refs keep the save path stable so timers never fire with a stale revision.
   const draftRef = useRef(draft);
   const flushRef = useRef<() => Promise<boolean>>(async () => true);
@@ -54,6 +59,12 @@ export default function App() {
   // reload never resets them.
   const aiEnabled = snap?.workspace.aiEnabled ?? false;
   const autoSummarize = snap?.workspace.autoSummarize ?? false;
+  // Local notes and captures always work. Recaps and auto-summaries need
+  // a signed-in account; aiEnabled follows the credential below.
+  const { credential, ready: authReady, refresh: refreshCredential } = useCredential(BACKEND_URL);
+  const signedIn = credential !== null;
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -71,6 +82,30 @@ export default function App() {
     chrome.storage.onChanged.addListener(listener);
     return () => chrome.storage.onChanged.removeListener(listener);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!snap) return;
+    if (credential && !snap.workspace.aiEnabled) {
+      void sendCommand({ type: "WORKSPACE_UPDATE", fields: { aiEnabled: true } }).then(() => refresh());
+    } else if (!credential && (snap.workspace.aiEnabled || snap.workspace.autoSummarize)) {
+      void sendCommand({ type: "WORKSPACE_UPDATE", fields: { aiEnabled: false, autoSummarize: false } }).then(() => refresh());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [credential, snap?.workspace.aiEnabled, snap?.workspace.autoSummarize]);
+
+  const handleSignIn = useCallback(async () => {
+    setSigningIn(true);
+    setSignInError(null);
+    try {
+      await signIn(BACKEND_URL);
+      await refreshCredential();
+      await refresh();
+    } catch (e) {
+      setSignInError(e instanceof Error ? e.message : "Could not sign in.");
+    } finally {
+      setSigningIn(false);
+    }
+  }, [refreshCredential, refresh]);
 
   const activeNote: Note | null = useMemo(() => {
     if (!snap) return null;
@@ -122,6 +157,7 @@ export default function App() {
         body: text.body,
       });
       const newer = outbox.current.get(note.id);
+      if (deletedNoteIds.current.has(key)) return true;
       if (newer) outbox.current.set(note.id, { ...newer, baseRevision: note.revision });
       // Merge only into the matching display; other notes are untouched.
       // Newer same-note typing stays on screen under the new revision.
@@ -136,6 +172,14 @@ export default function App() {
       return true;
     } catch (e) {
       const code = (e as Error & { code?: string }).code;
+      if (code === "NOT_FOUND") {
+        // The note was deleted (here or in another panel): drop the pending
+        // edit instead of requeueing it forever.
+        outbox.current.delete(key);
+        setDraft((d) => (d.id === key ? { id: null, title: "", body: "", baseRevision: 0 } : d));
+        if (!conflictedNoteId.current && shouldClaimSaved(outbox.current.size)) setSaveState("saved");
+        return false;
+      }
       if (code === "REVISION_CONFLICT") {
         conflictedNoteId.current = key;
         // Hold the failed text for explicit resolution; it is NOT requeued,
@@ -188,22 +232,51 @@ export default function App() {
   );
 
   // Drain every queued note before leaving it, so no text is left behind.
+  const dropPendingNote = useCallback((id: string) => {
+    // Deleting a note also drops its unsent edits, pending timer, and conflict
+    // state so a queued autosave cannot redisplay it or retry it forever.
+    deletedNoteIds.current.add(id);
+    outbox.current.delete(id);
+    if (outbox.current.size === 0 && saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (conflictedNoteId.current === id) {
+      conflictedNoteId.current = null;
+      setConflictNote(null);
+      setConflictText(null);
+      if (outbox.current.size === 0 && !inFlightSave.current) setSaveState("saved");
+    }
+    setDraft((d) => (d.id === id ? { id: null, title: "", body: "", baseRevision: 0 } : d));
+  }, []);
+  // Wait for in-flight saves so no text is left behind. Returns false only
+  // for revision conflicts, which need explicit user resolution. Transient
+  // failures keep their text queued in the per-note outbox and do NOT block
+  // navigation: pending edits are keyed by note and reappear when their note
+  // is shown again.
   const drainOutbox = useCallback(async (): Promise<boolean> => {
     for (let guard = 0; guard < 50 && (outbox.current.size > 0 || inFlightSave.current); guard++) {
-      if (!(await flushSave())) return false;
+      if (conflictedNoteId.current) return false;
+      const drained = await flushSave();
+      if (conflictedNoteId.current) return false;
+      // Transient failure (or a dropped deleted-note edit): keep the queued
+      // text and let the user navigate instead of retry-spinning here.
+      if (!drained) break;
     }
-    return outbox.current.size === 0 && !inFlightSave.current && !conflictedNoteId.current;
+    return !conflictedNoteId.current;
   }, [flushSave]);
 
   // Flush on tab switch / explicit close.
   const selectNote = useCallback(
     async (id: string) => {
       if (!(await drainOutbox())) return;
-      await sendCommand({ type: "WORKSPACE_UPDATE", fields: { activeNoteId: id } });
       const ws = snap?.workspace;
-      if (ws && !ws.openNoteIds.includes(id)) {
-        await sendCommand({ type: "WORKSPACE_UPDATE", fields: { openNoteIds: [...ws.openNoteIds, id], activeNoteId: id } });
-      }
+      await sendCommand({
+        type: "WORKSPACE_UPDATE",
+        fields: ws && !ws.openNoteIds.includes(id)
+          ? { openNoteIds: [...ws.openNoteIds, id], activeNoteId: id }
+          : { activeNoteId: id },
+      });
       await refresh();
     },
     [drainOutbox, refresh, snap?.workspace],
@@ -217,7 +290,7 @@ export default function App() {
 
   const runSummary = useCallback(
     async (checkpointId: string) => {
-      if (busySummary || !aiEnabled) return;
+      if (busySummary || !aiEnabled || !signedIn || !credential) return;
       setBusySummary(true);
       try {
         const { job, payload } = await sendCommand<{
@@ -228,12 +301,16 @@ export default function App() {
           const res = await postSummary(BACKEND_URL, payload);
           await sendCommand({ type: "SUMMARY_COMPLETE", checkpointId, requestId: res.requestId, result: res.summary });
         } catch (e) {
-          const code = (e as Error & { code?: string }).code ?? "SUMMARY_FAILED";
+          const err = e as Error & { code?: string; retryAfterSeconds?: number };
           await sendCommand({
             type: "SUMMARY_FAIL",
             checkpointId,
             requestId: job.requestId ?? payload.requestId,
-            error: { code, message: e instanceof Error ? e.message.slice(0, 500) : "Summary failed." },
+            error: {
+              code: err.code ?? "SUMMARY_FAILED",
+              message: e instanceof Error ? e.message.slice(0, 500) : "Summary failed.",
+              ...(typeof err.retryAfterSeconds === "number" ? { retryAfterSeconds: err.retryAfterSeconds } : {}),
+            },
           });
         }
       } finally {
@@ -241,7 +318,7 @@ export default function App() {
         await refresh();
       }
     },
-    [busySummary, aiEnabled, includeNoteIds, refresh],
+    [busySummary, aiEnabled, signedIn, credential, includeNoteIds, refresh],
   );
 
   const setAiEnabled = useCallback(
@@ -274,9 +351,10 @@ export default function App() {
         return false;
       }
       try {
+      const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
       const { note } = await sendCommand<{ note: Note }>({
         type: "NOTE_CREATE",
-        title: `Pasted code — ${checkpoint?.title ?? "checkpoint"}`.slice(0, 300),
+        title: `Pasted code — ${checkpoint?.title ?? "checkpoint"} · ${stamp}`.slice(0, 300),
         linkedCheckpointId: checkpointId,
         body: code,
         kind: "codeOverride",
@@ -297,13 +375,13 @@ export default function App() {
   // exactly one automatic summary attempt.
   useEffect(() => {
     const newest = snap?.checkpoints[0];
-    if (!newest || !aiEnabled || !autoSummarize || busySummary) return;
+    if (!newest || !aiEnabled || !autoSummarize || busySummary || !signedIn) return;
     const job = snap?.summaries[newest.id];
     if (job && job.status !== "idle") return;
     if (autoRanFor.current === newest.id) return;
     autoRanFor.current = newest.id;
     void runSummary(newest.id);
-  }, [snap?.checkpoints, snap?.summaries, aiEnabled, autoSummarize, busySummary, runSummary]);
+  }, [snap?.checkpoints, snap?.summaries, aiEnabled, autoSummarize, busySummary, signedIn, runSummary]);
 
   const exportJson = useCallback(async () => {
     const all = await chrome.storage.local.get(null);
@@ -319,6 +397,14 @@ export default function App() {
   }, []);
 
   if (loadError) return <div className="app"><div className="error">Storage error: {loadError}</div></div>;
+  if (!authReady) return <div className="app"><div className="empty">Checking sign-in…</div></div>;
+  if (!signedIn) {
+    return (
+      <div className="app">
+        <SignInPage signingIn={signingIn} signInError={signInError} onSignIn={() => void handleSignIn()} />
+      </div>
+    );
+  }
   if (!snap) return <div className="app"><div className="empty">Loading local workspace…</div></div>;
 
   return (
@@ -345,8 +431,6 @@ export default function App() {
             checkpoint={selectedCheckpoint}
             job={selectedJob}
             busy={busySummary}
-            aiEnabled={aiEnabled}
-            onAiEnabled={(v) => void setAiEnabled(v)}
             autoSummarize={autoSummarize}
             onAutoSummarize={(v) => void setAutoSummarize(v)}
             onSummarize={() => selectedCheckpoint && void runSummary(selectedCheckpoint.id)}
@@ -376,6 +460,14 @@ export default function App() {
                 {n.title} (rev {n.revision})
               </label>
             ))}
+            {selectedJob && selectedJob.warnings.length > 0 && (
+              <div className="warning" role="note">
+                <strong>Recap warnings for this checkpoint:</strong>
+                {selectedJob.warnings.map((w, i) => (
+                  <div key={i}>{w}</div>
+                ))}
+              </div>
+            )}
           </section>
         </>
       )}
@@ -399,11 +491,20 @@ export default function App() {
             await refresh();
           }}
           onDelete={async (id) => {
+            dropPendingNote(id);
+            setIncludeNoteIds((ids) => ids.filter((x) => x !== id));
             await sendCommand({ type: "NOTE_DELETE", id });
             await refresh();
           }}
           onRename={async (id, title) => {
-            const n = snap.notes.find((x) => x.id === id);
+            // Flush pending typing first so the rename builds on the latest
+            // revision instead of manufacturing a revision conflict.
+            if (!(await drainOutbox())) return;
+            const fresh = await chrome.storage.local
+              .get([`note:${id}`])
+              .then((g) => (g as Record<string, Note>)[`note:${id}`])
+              .catch(() => null);
+            const n = fresh ?? snap.notes.find((x) => x.id === id);
             if (!n) return;
             try {
               await sendCommand({ type: "NOTE_UPDATE", id, baseRevision: n.revision, title, body: n.body });
@@ -458,7 +559,7 @@ export default function App() {
         />
       )}
 
-      <AccountSettings />
+      <AccountSettings onAuthChange={() => { void refreshCredential(); void refresh(); }} />
       <footer>
         <button className="link" onClick={() => void exportJson()}>
           Export JSON

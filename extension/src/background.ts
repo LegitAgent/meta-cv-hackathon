@@ -9,6 +9,7 @@ import {
   type LastCapture,
   type WorkerCommand,
   type WorkerResponse,
+  type Workspace,
 } from "./shared/contracts";
 import { buildSummaryPayload } from "./shared/payload";
 import { cleanUrl, taskKeyForUrl } from "./capture/types";
@@ -215,6 +216,44 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
   return ok({ checkpoint: cp });
 }
 
+/** Newest checkpoint id for a task, or null when nothing matches. */
+export function newestCheckpointIdForTask(checkpoints: Checkpoint[], taskKey: string): string | null {
+  let best: Checkpoint | null = null;
+  for (const c of checkpoints) {
+    if (c.taskKey !== taskKey) continue;
+    if (!best || c.createdAt > best.createdAt) best = c;
+  }
+  return best?.id ?? null;
+}
+
+/** Follow browser tab switches: select the newest checkpoint for the active
+ * tab's task so the side panel updates. Keeps the current selection when the
+ * tab has no checkpoint (unrelated browsing) or its URL is unreadable. */
+async function syncSelectionToTab(tabId: number): Promise<void> {
+  let url = "";
+  try {
+    url = (await chrome.tabs.get(tabId)).url ?? "";
+  } catch {
+    return;
+  }
+  if (!url) return;
+  const taskKey = taskKeyForUrl(cleanUrl(url));
+  if (!taskKey) return;
+  try {
+    const all = await chromeArea.get(null);
+    const checkpoints = Object.entries(all)
+      .filter(([key]) => key.startsWith("checkpoint:"))
+      .map(([, value]) => value as Checkpoint);
+    const id = newestCheckpointIdForTask(checkpoints, taskKey);
+    if (!id) return;
+    const ws = all["workspace"] as Workspace | undefined;
+    if (ws?.selectedCheckpointId === id) return;
+    await repo.updateWorkspace({ selectedCheckpointId: id });
+  } catch {
+    // Read-only failure: keep the current selection.
+  }
+}
+
 async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
   switch (cmd.type) {
     case "NOTE_CREATE": {
@@ -248,11 +287,14 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
         // here. Live notes are never reread, so edits after this point
         // cannot change the request, and the request ID always matches
         // the job that owns these inputs.
-        const { job, checkpoint, notes } = await repo.beginSummary(cmd.checkpointId, cmd.noteIds);
+        const { job, checkpoint, notes, missingNoteIds } = await repo.beginSummary(cmd.checkpointId, cmd.noteIds);
         const built = buildSummaryPayload(checkpoint, job.requestId as string, notes);
-        if (built.warnings.length > 0) {
-          await repo.setSummaryWarnings(cmd.checkpointId, job.requestId as string, built.warnings);
-          job.warnings = built.warnings;
+        // Deleted or unknown note IDs never reach the payload builder, so they
+        // get their own warning here instead of failing silently.
+        const warnings = [...missingNoteIds.map((id) => `Note "${id}" was deleted before the recap and was left out.`), ...built.warnings];
+        if (warnings.length > 0) {
+          await repo.setSummaryWarnings(cmd.checkpointId, job.requestId as string, warnings);
+          job.warnings = warnings;
         }
         return ok({ job, payload: built.payload });
       } catch {
@@ -267,6 +309,11 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
     case "SUMMARY_FAIL": {
       const recorded = await repo.failSummary(cmd.checkpointId, cmd.requestId, cmd.error);
       return ok({ recorded });
+    }
+    case "CAPTURE": {
+      const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!active || active.id === undefined) return fail("NO_ACTIVE_TAB", "No active tab to capture.");
+      return runCaptureFlow(active.id, active.url ?? "");
     }
     case "CHECKPOINT_DELETE": {
       const r = await repo.deleteCheckpoint(cmd.id);
@@ -311,6 +358,42 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   return true; // async response
 });
 
+// Shared capture-and-record flow: save locally first, then persist the
+// outcome so the panel can show failures, not just successes.
+async function runCaptureFlow(tabId: number, tabUrl: string): Promise<WorkerResponse> {
+  await ready.catch(() => undefined);
+  await chrome.storage.local.set({ "meta:capturing": { at: nowIso(), tabId } }).catch(() => undefined);
+  const result = await captureTab(tabId, tabUrl);
+  await chrome.storage.local.remove(["meta:capturing"]).catch(() => undefined);
+  if (result.ok) {
+    const data = result.data as { checkpoint?: { id?: string } };
+    await chrome.storage.local
+      .set({
+        "meta:lastCapture": {
+          ok: true,
+          at: nowIso(),
+          checkpointId: data?.checkpoint?.id ?? null,
+          code: null,
+          message: null,
+        } satisfies LastCapture,
+      })
+      .catch(() => undefined);
+  } else {
+    await chrome.storage.local
+      .set({
+        "meta:lastCapture": {
+          ok: false,
+          at: nowIso(),
+          checkpointId: null,
+          code: result.error?.code ?? "CAPTURE_FAILED",
+          message: result.error?.message ?? "Capture failed.",
+        } satisfies LastCapture,
+      })
+      .catch(() => undefined);
+  }
+  return result;
+}
+
 // Toolbar click: open the panel immediately in the user-gesture handler,
 // then capture using the clicked tab ID.
 chrome.action.onClicked.addListener((tab) => {
@@ -324,38 +407,18 @@ chrome.action.onClicked.addListener((tab) => {
       // Panel open failure must not block capture.
     }
     if (tabId === undefined) return;
-    await ready.catch(() => undefined);
-    await chrome.storage.local.set({ "meta:capturing": { at: nowIso(), tabId } }).catch(() => undefined);
-    const result = await captureTab(tabId, tabUrl);
-    await chrome.storage.local.remove(["meta:capturing"]).catch(() => undefined);
-    // Persist the outcome so the panel can show failures, not just successes.
-    if (result.ok) {
-      const data = result.data as { checkpoint?: { id?: string } };
-      await chrome.storage.local
-        .set({
-          "meta:lastCapture": {
-            ok: true,
-            at: nowIso(),
-            checkpointId: data?.checkpoint?.id ?? null,
-            code: null,
-            message: null,
-          } satisfies LastCapture,
-        })
-        .catch(() => undefined);
-    } else {
-      await chrome.storage.local
-        .set({
-          "meta:lastCapture": {
-            ok: false,
-            at: nowIso(),
-            checkpointId: null,
-            code: result.error?.code ?? "CAPTURE_FAILED",
-            message: result.error?.message ?? "Capture failed.",
-          } satisfies LastCapture,
-        })
-        .catch(() => undefined);
-    }
+    await runCaptureFlow(tabId, tabUrl);
   })();
+});
+
+// Keep the panel on the current tab's work: tab switches and navigations
+// re-point the selection at the newest checkpoint for that tab's task.
+// The panel refreshes through the existing storage listener.
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  void syncSelectionToTab(tabId);
+});
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === "complete" || info.url !== undefined) void syncSelectionToTab(tabId);
 });
 
 ready = init();

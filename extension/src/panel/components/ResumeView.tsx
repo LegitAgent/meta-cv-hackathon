@@ -1,5 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Checkpoint, SummaryJob } from "../../shared/contracts";
+
+function RetryCountdown({ readyAt }: { readyAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (readyAt <= Date.now()) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [readyAt]);
+  const left = Math.max(0, Math.ceil((readyAt - now) / 1000));
+  return <span>{left > 0 ? `Retry available in ${left}s.` : "You can retry now."}</span>;
+}
 
 function fmtTime(iso: string): string {
   try {
@@ -32,8 +43,6 @@ export function ResumeView({
   onCopyCode,
   onOpenSource,
   busy,
-  aiEnabled,
-  onAiEnabled,
   autoSummarize,
   onAutoSummarize,
   onPasteCode,
@@ -45,8 +54,6 @@ export function ResumeView({
   onCopyCode: () => void;
   onOpenSource: () => void;
   busy: boolean;
-  aiEnabled: boolean;
-  onAiEnabled: (v: boolean) => void;
   autoSummarize: boolean;
   onAutoSummarize: (v: boolean) => void;
   onPasteCode: (code: string) => Promise<boolean>;
@@ -95,32 +102,36 @@ export function ResumeView({
       )}
       <div className="consent">
         <label>
-          <input type="checkbox" checked={aiEnabled} onChange={(e) => onAiEnabled(e.target.checked)} /> I understand the
-          selected checkpoint leaves the device for summarization.
-        </label>
-        <label>
           <input
             type="checkbox"
             checked={autoSummarize}
-            disabled={!aiEnabled}
             onChange={(e) => onAutoSummarize(e.target.checked)}
           />{" "}
           Summarize new captures automatically.
         </label>
       </div>
       <div className="row">
-        <button onClick={onSummarize} disabled={busy || !aiEnabled}>
+        <button className="primary" onClick={onSummarize} disabled={busy}>
           {busy ? "Summarizing…" : job?.status === "pending" ? "Retry summary" : "Generate recap"}
         </button>
       </div>
       {job && job.warnings.length > 0 && (
         <div className="warning">
           {job.warnings.map((w, i) => (
-            <div key={i}>{w}</div>
+            <div key={w}>{w}</div>
           ))}
         </div>
       )}
-      {job?.status === "failed" && job.error && <div className="error">Summary failed ({job.error.code}): {job.error.message}</div>}
+      {job?.status === "failed" && job.error && (
+        <div className="error">
+          Summary failed ({job.error.code}): {job.error.message}{" "}
+          {job.error.code === "RATE_LIMITED" &&
+            typeof job.error.retryAfterSeconds === "number" &&
+            job.startedAt && !Number.isNaN(Date.parse(job.startedAt)) && (
+              <RetryCountdown readyAt={Date.parse(job.startedAt) + job.error.retryAfterSeconds * 1000} />
+            )}
+        </div>
+      )}
     </section>
   );
 }
@@ -133,6 +144,24 @@ export function SummaryCard({ job }: { job: SummaryJob | null }) {
     <section className="card summary">
       <h3>Recap</h3>
       <p>{s.recap}</p>
+      <button
+        className="link"
+        onClick={() =>
+          void navigator.clipboard
+            .writeText(
+              [
+                s.recap,
+                `Next action: ${s.nextAction}`,
+                s.possibleBlocker ? `Possible blocker: ${s.possibleBlocker}` : null,
+              ]
+                .filter((line): line is string => line !== null)
+                .join("\n\n"),
+            )
+            .catch(() => undefined)
+        }
+      >
+        Copy recap
+      </button>
       <button className="link" onClick={() => setShowFacts((v) => !v)}>
         {showFacts ? "Hide observed facts" : `Show observed facts (${s.observedFacts.length})`}
       </button>
@@ -158,7 +187,7 @@ export function SummaryCard({ job }: { job: SummaryJob | null }) {
           <strong>Uncertainties:</strong>
           <ul>
             {s.uncertainties.map((u, i) => (
-              <li key={i}>{u}</li>
+              <li key={u}>{u}</li>
             ))}
           </ul>
         </div>

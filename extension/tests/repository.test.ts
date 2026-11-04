@@ -73,6 +73,23 @@ describe("repository", () => {
     expect(await repo.getCheckpoint("c1")).toBe(null);
   });
 
+  it("deleted checkpoints and notes stay deleted after a restart", async () => {
+    const area = memArea();
+    const repo = new Repository(area);
+    await repo.createCheckpoint(cp("gone"));
+    const note = await repo.createNote("doomed");
+    expect(await repo.deleteCheckpoint("gone")).toEqual({ deleted: true });
+    expect(await repo.deleteNote(note.id)).toBe(true);
+    // A worker restart reuses the same storage: nothing may come back.
+    const restarted = new Repository(area);
+    expect(await restarted.getCheckpoint("gone")).toBe(null);
+    expect(await restarted.getNote(note.id)).toBe(null);
+    const report = await reconcileOnStartup(area);
+    expect(await restarted.getCheckpoint("gone")).toBe(null);
+    expect(await restarted.getNote(note.id)).toBe(null);
+    expect(report.removedWorkspaceRefs).toEqual([]);
+  });
+
   it("queues rapid successive captures without interleaving", async () => {
     const repo = new Repository(memArea());
     await Promise.all([repo.createCheckpoint(cp("a")), repo.createCheckpoint(cp("b")), repo.createCheckpoint(cp("c"))]);
@@ -100,6 +117,28 @@ describe("repository", () => {
     const note = await repo.createNote("long note", null, "x".repeat(15000));
     const { notes } = await repo.beginSummary("long", [note.id]);
     expect(notes[0].body).toHaveLength(15000);
+  });
+
+  it("reports selected notes that no longer exist", async () => {
+    const repo = new Repository(memArea());
+    await repo.createCheckpoint(cp("c4"));
+    const { notes, missingNoteIds } = await repo.beginSummary("c4", ["ghost"]);
+    expect(notes).toEqual([]);
+    expect(missingNoteIds).toEqual(["ghost"]);
+  });
+
+  it("prunes old activity events on startup", async () => {
+    const area = memArea();
+    const repo = new Repository(area);
+    await repo.createCheckpoint(cp("c5"));
+    for (let i = 0; i < 205; i++) {
+      await repo.appendEvent("checkpoint.captured", "c5", null);
+    }
+    const report = await reconcileOnStartup(area);
+    const all = await area.get(null);
+    const remaining = Object.keys(all).filter((k) => k.startsWith("event:"));
+    expect(remaining).toHaveLength(200);
+    expect(report.prunedEventIds).toHaveLength(6);
   });
 
   it("late summary results do not overwrite newer jobs", async () => {
@@ -143,7 +182,6 @@ describe("repository", () => {
         requestId: "r-old",
         status: "pending",
         startedAt: new Date(Date.now() - 120_000).toISOString(),
-        inputHash: null,
         includedNoteSnapshots: [],
         result: null,
         error: null,

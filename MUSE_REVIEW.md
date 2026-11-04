@@ -87,3 +87,67 @@ These are source-review observations, not full live Chrome verification.
 ## Collaboration
 
 Muse should implement fixes and tests; Codex reviews and updates this file. Preserve unrelated user work. Do not install tools or dependencies solely to satisfy this review without checking what the project already provides. Direct Muse session messaging was attempted but reported unsupported on this platform.
+
+---
+
+# Muse Spark review — 2026-11-05 (working tree, uncommitted changes present)
+
+Scope: full repo read (`backend/worker/src/*.ts`, all `extension/src/**/*.ts(x)`, `manifest.json`, `wrangler.jsonc`, `.gitignore`, tests). `git status` shows 12 modified + 3 untracked files; findings below are against the working tree.
+
+Verified: `extension` — `tsc --noEmit` clean, `vitest run` 10 files / 63 tests passed. `backend/worker` — `tsc --noEmit` clean. Worker `vitest` was not run (unsandboxed execution needs approval; prompts are disabled in this session), so backend behavior claims are code-reading only.
+
+## Bugs
+
+### B1 — High: `Bearer` prefix regex corrupts tokens starting with `[REDACTED ]` characters
+File: `backend/worker/src/index.ts` (line 136):
+`token = ...replace(/^Bearer [REDACTED], "")`. `[REDACTED]` is a character class, not the word REDACTED, and there is no `+` quantifier, so it strips `"Bearer "` plus exactly one following character whenever that character is in `[REDACTED ]`. Any Google identity token whose first character after the space is in that set loses a character, fails `verifyGoogleToken`, and returns 401. Fix: `.replace(/^Bearer\s+/, "")`.
+
+### B2 — Medium: rename-while-typing causes a spurious revision conflict
+File: `extension/src/panel/App.tsx` (`onRename`). Rename sends `NOTE_UPDATE` with the snapshot revision while the outbox may hold unsent typing for the same note. The rename bumps the revision, so the queued autosave then hits `REVISION_CONFLICT` and forces manual resolution for what is really one user's linear edits. Fix: drain/flush the outbox before rename, or fold pending text into the rename write.
+
+### B3 — Medium: note switch is blocked by transient save failures
+File: `extension/src/panel/App.tsx` (`drainOutbox` + `selectNote`). `flushSave` returns `false` on any failure including requeued transient errors, and `selectNote`/`onCreate`/`onClose` abort the navigation when `drainOutbox()` is false. Since the outbox already preserves per-note text safely across switches, a transient storage failure traps the user on the current note. Consider allowing the switch while keeping the queued edit.
+
+### B4 — Medium: deleted selected notes are silently dropped from the recap request
+File: `extension/src/storage/repository.ts` (`beginSummary`). Note IDs with no live record are filtered out with no signal, so a recap can silently cover fewer notes than the user selected. At minimum surface a warning like the existing trim warnings.
+
+### B5 — Low: redundant double `WORKSPACE_UPDATE` on note select
+File: `extension/src/panel/App.tsx` (`selectNote`). When the note is not yet open it sends one update for `activeNoteId` and a second adding `openNoteIds`; the second supersedes the first. One write is enough.
+
+### B6 — Low: non-JSON error pages throw `SyntaxError` instead of a friendly error
+File: `extension/src/panel/api.ts` (`responseJson`). `await response.json()` runs before the `ok` check, so a Cloudflare/proxy HTML error page escapes as `SyntaxError` with no `code`. Parse defensively and fall back to `HTTP_<status>`.
+
+### B7 — Low: "virtualized lines" warning fires even when nothing was read
+Files: `extension/src/capture/leetcode.ts` + `extension/src/background.ts`. `extractLeetCodeProblemInPage` always returns `partial: true`, and `buildLeetCodeOutcome` warns whenever `codePartial` is true — including the all-null case where no editor lines were seen at all. Gate the warning on `code !== null`.
+
+### B8 — Low: missing `code` is hidden when the problem statement is also missing
+File: `extension/src/capture/leetcode.ts`. `else if (raw.code === null)` only records missing code when `pageTextFromProblem` exists. When both are absent the quality badge understates what is missing.
+
+### B9 — Low: `innerText` on a detached clone may under-read page text
+File: `extension/src/capture/generic.ts`. `innerText` is layout-dependent and can return `""` on detached nodes in some engines, producing `missing: ["pageText"]` on pages that do have text. `textContent` with whitespace collapsing is the safer fallback.
+
+### B10 — Info: dead/untracked files in the tree
+`extension/src/panel/components/SignInPage.tsx` (untracked) is not imported anywhere — `App.tsx` renders its own inline sign-in gate. `extension/patch-app2.py`, `patch-shim3.py`, `patch-shim4.py` are untracked helper scripts. Either wire them in or remove them; at minimum `gitignore` them if they are local tooling.
+
+### B11 — Info: `inputHash` is never computed; abort path masks real errors
+`beginSummary` always stores `inputHash: null` (dead field — remove it or hash the payload for idempotency logging). In `backend/worker/src/index.ts` (`infer()` catch) any error becomes 504 `UPSTREAM_TIMEOUT` when `controller.signal.aborted` is set, including validation/`ApiError`s already in flight — check `e instanceof ApiError` first.
+
+Not bugs (checked, OK): `.dev.vars` and `.npm-cache/` are properly gitignored; `GOOGLE_CLIENT_ID` in `wrangler.jsonc` is a public client ID by design; `setSummaryWarnings`/`completeSummary`/`failSummary` correctly gate on `requestId`; cache keys include principal + model + prompt + content; `TRUSTED_CONTEXTS` + sender checks are in place.
+
+## QOL recommendations
+
+1. Show the 429 `Retry-After` countdown in the panel instead of a static message; the backend already sends the header.
+2. Display `job.warnings` next to the note checklist (currently only under Resume), so users see *which* notes were trimmed before retrying.
+3. Name pasted-code notes with the checkpoint title + timestamp; several "Pasted code" notes are indistinguishable in the selector.
+4. Add a "copy recap" button on `SummaryCard`; export JSON already exists but recaps cannot be copied in one click.
+5. Cap the `Activity` event list growth — events are append-only per checkpoint/summary and will eventually press against `chrome.storage.local` quota alongside the quota handling already in `captureTab`.
+6. Combine the two `WORKSPACE_UPDATE` writes in `selectNote` (B5) and debounce `syncSelectionToTab` on rapid tab switches.
+
+## Design choices (as found — mostly sound)
+
+- **Per-note outbox + revision conflicts** (panel owns drafts, worker serializes writes): correct call. Fixes R1/R2 without OT complexity. Residual risks are B2/B3 above, both small deltas on the same design.
+- **Snapshot-based summary payload** (`beginSummary` returns checkpoint + note snapshots; `buildSummaryPayload` never rereads live notes): the right fix for R4 and worth keeping. Gap is only the silent-drop in B4.
+- **Immutable checkpoints + `codeOverride` notes**: good — pasted code never rewrites captured evidence, and the quality-warning rewrite makes precedence explicit. Budget split (overrides bypass the 10k note aggregate, capped at 30k) is reasonable but should stay documented in UI, as it currently is.
+- **Worker as single writer with an in-memory op queue**: appropriate for `chrome.storage.local`'s lack of transactions. Note the queue does not survive worker restart — the 60s stale-pending reconciler covers that; keep both.
+- **Gmail-only + short-lived session tokens**: defensible for a hackathon; the `@gmail.com` restriction is a product decision, not a bug, but keep it visible pre-sign-in (the Account card does; the panel gate does).
+- **Edge cache keyed by credential-digest + model + prompt + content, 5-min TTL**: sensible cost saver. Cache hits still count against `TOKEN_LIMITER` (limit check runs before cache lookup) — intentional or not, document it: currently a cached recap still spends rate-limit budget.

@@ -17,7 +17,11 @@ function setup(tabUrl: string | undefined, liveUrls: (string | undefined)[] = []
     action: { onClicked: { addListener: (fn: (tab: ClickedTab) => void) => { onClicked = fn; } } },
     sidePanel: { open: vi.fn(async () => undefined) },
     scripting: { executeScript },
-    tabs: { get: vi.fn(async () => ({ url: liveUrls[getCalls++] })) },
+    tabs: {
+      get: vi.fn(async () => ({ url: liveUrls[getCalls++] })),
+      onActivated: { addListener: vi.fn() },
+      onUpdated: { addListener: vi.fn() },
+    },
     storage: { local: {
       get: (keys: string[] | null, callback?: (value: Record<string, unknown>) => void) => {
         const value = keys === null ? { ...records } : Object.fromEntries(keys.filter((key) => key in records).map((key) => [key, records[key]]));

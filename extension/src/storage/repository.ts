@@ -45,7 +45,6 @@ export function defaultSummaryJob(checkpointId: string): SummaryJob {
     requestId: null,
     status: "idle",
     startedAt: null,
-    inputHash: null,
     includedNoteSnapshots: [],
     result: null,
     error: null,
@@ -223,7 +222,7 @@ export class Repository {
   beginSummary(
     checkpointId: string,
     noteIds: string[],
-  ): Promise<{ job: SummaryJob; checkpoint: Checkpoint; notes: { id: string; revision: number; body: string }[] }> {
+  ): Promise<{ job: SummaryJob; checkpoint: Checkpoint; notes: { id: string; revision: number; body: string }[]; missingNoteIds: string[] }> {
     return this.enqueue(async () => {
       const got = await this.area.get([keyCheckpoint(checkpointId), keySummary(checkpointId), ...noteIds.map(keyNote)]);
       const cp = got[keyCheckpoint(checkpointId)] as Checkpoint | undefined;
@@ -244,14 +243,15 @@ export class Repository {
         requestId: newId(),
         status: "pending",
         startedAt: nowIso(),
-        inputHash: null,
         includedNoteSnapshots: snapshots,
         result: prev.result,
         error: null,
         warnings: [],
       };
       await this.area.set({ [keySummary(checkpointId)]: job });
-      return { job, checkpoint: cp, notes: snapshots };
+      const found = new Set(snapshots.map((s) => s.id));
+      const missingNoteIds = noteIds.filter((id) => !found.has(id));
+      return { job, checkpoint: cp, notes: snapshots, missingNoteIds };
     });
   }
 
@@ -280,7 +280,7 @@ export class Repository {
     });
   }
 
-  failSummary(checkpointId: string, requestId: string, error: { code: string; message: string }): Promise<boolean> {
+  failSummary(checkpointId: string, requestId: string, error: { code: string; message: string; retryAfterSeconds?: number }): Promise<boolean> {
     return this.enqueue(async () => {
       const job = await this.getSummaryJob(checkpointId);
       if (job.requestId !== requestId) return false;

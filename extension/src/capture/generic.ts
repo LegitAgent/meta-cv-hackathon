@@ -44,7 +44,9 @@ export function extractGenericInPage(): RawPageExtraction {
     const root = doc.querySelector("main, article") || doc.body;
     const clone = root.cloneNode(true) as HTMLElement;
     clone.querySelectorAll("script, style, noscript, input, textarea, select").forEach((n) => n.remove());
-    pageText = (clone.innerText || "").trim();
+    // innerText is layout-dependent and can read empty on some pages; fall
+    // back to textContent so extractable text is not reported as missing.
+    pageText = (clone.innerText || clone.textContent || "").replace(/\s+/g, " ").trim();
   } catch {
     missing.push("pageText");
   }

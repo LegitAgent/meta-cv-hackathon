@@ -38,7 +38,15 @@ export async function postSummary(
       } catch {
         // Keep the default message.
       }
-      throw Object.assign(new Error(message), { code });
+      const thrown = Object.assign(new Error(message), { code }) as Error & {
+        code: string;
+        retryAfterSeconds?: number;
+      };
+      if (res.status === 429) {
+        const wait = Number(res.headers.get("Retry-After"));
+        if (Number.isFinite(wait) && wait >= 0) thrown.retryAfterSeconds = Math.floor(wait);
+      }
+      throw thrown;
     }
     const json: unknown = await res.json();
     const parsed = backendSummaryResponseSchema.safeParse(json);

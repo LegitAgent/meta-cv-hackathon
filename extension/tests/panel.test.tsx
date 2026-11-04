@@ -10,7 +10,7 @@ function note(id: string, body = ""): Note {
   return { id, revision: 0, title: id, body, createdAt: "2026-01-01", updatedAt: "2026-01-01", linkedCheckpointId: null };
 }
 
-function setup() {
+function setup(opts: { signedIn?: boolean } = {}) {
   const records: Record<string, unknown> = {
     workspace: { openNoteIds: ["a"], activeNoteId: "a", selectedCheckpointId: null, aiEnabled: false, autoSummarize: false, backendUrl: "http://127.0.0.1:8001" },
     "note:a": note("a"),
@@ -27,6 +27,11 @@ function setup() {
         }),
       },
       onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
+      session: {
+        get: vi.fn(async () => (opts.signedIn ? { backendCredential: { origin: "https://backtrack.martinalba.dev", token: "test-token", email: "test@gmail.com", expiresAt: Date.now() + 3600000 } } : {})),
+        set: vi.fn(async () => undefined),
+        remove: vi.fn(async () => undefined),
+      },
     },
     runtime: {
       lastError: undefined,
@@ -45,6 +50,12 @@ function setup() {
           records["note:b"] = created;
           records.workspace = { ...(records.workspace as object), openNoteIds: ["a", "b"], activeNoteId: "b" };
           callback({ ok: true, data: { note: created } });
+        } else if (message.type === "NOTE_DELETE") {
+          delete records[`note:${message.id}`];
+          const ws = records.workspace as { openNoteIds: string[]; activeNoteId: string | null };
+          const open = ws.openNoteIds.filter((id) => id !== message.id);
+          records.workspace = { ...ws, openNoteIds: open, activeNoteId: ws.activeNoteId === message.id ? (open[open.length - 1] ?? null) : ws.activeNoteId };
+          callback({ ok: true, data: { deleted: true } });
         } else if (message.type === "WORKSPACE_UPDATE") {
           records.workspace = { ...(records.workspace as object), ...message.fields };
           callback({ ok: true, data: { workspace: records.workspace } });
@@ -70,7 +81,7 @@ afterEach(() => {
 
 describe("panel note switching", () => {
   it("waits for the originating note save before creating the next note", async () => {
-    const { records, updateSent, releaseSave } = setup();
+    const { records, updateSent, releaseSave } = setup({ signedIn: true });
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
     const editor = await screen.findByRole("textbox", { name: "Note body" });
@@ -85,7 +96,7 @@ describe("panel note switching", () => {
   });
 
   it("keeps newer typing and saves it with the revision returned by a delayed save", async () => {
-    const { records, updateSent, releaseSave } = setup();
+    const { records, updateSent, releaseSave } = setup({ signedIn: true });
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
     const editor = await screen.findByRole("textbox", { name: "Note body" });
@@ -103,7 +114,7 @@ describe("panel note switching", () => {
   });
 
   it("stops a note switch on revision conflict until the user resolves it", async () => {
-    const { records, updateSent, rejectSave, releaseSave } = setup();
+    const { records, updateSent, rejectSave, releaseSave } = setup({ signedIn: true });
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Note body" }), { target: { value: "my draft" } });
@@ -121,6 +132,44 @@ describe("panel note switching", () => {
   });
 });
 
+it("flushes pending typing before renaming the note", async () => {
+  const { records, updateSent, releaseSave } = setup({ signedIn: true });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Note body" }), { target: { value: "typed body" } });
+  fireEvent.doubleClick(screen.getByText("a", { selector: "span[title='Double-click to rename']" }));
+  const renameInput = document.querySelector(".tab.active input");
+  expect(renameInput).toBeTruthy();
+  fireEvent.change(renameInput as HTMLInputElement, { target: { value: "renamed" } });
+  fireEvent.keyDown(renameInput as HTMLInputElement, { key: "Enter", code: "Enter", charCode: 13 });
+  await waitFor(() => expect(updateSent).toHaveBeenCalledTimes(1));
+  await act(async () => releaseSave());
+  await waitFor(() => expect(updateSent).toHaveBeenCalledTimes(2));
+  expect(updateSent.mock.calls[0][0]).toMatchObject({ id: "a", body: "typed body", baseRevision: 0 });
+  expect(updateSent.mock.calls[1][0]).toMatchObject({ id: "a", title: "renamed", body: "typed body", baseRevision: 1 });
+  await act(async () => releaseSave());
+  await waitFor(() => expect((records["note:a"] as Note).title).toBe("renamed"));
+  expect((records["note:a"] as Note).body).toBe("typed body");
+});
+
+it("deleting a note drops its pending autosave instead of retrying it", async () => {
+  const prevConfirm = window.confirm;
+  window.confirm = () => true;
+  try {
+    const { records, updateSent } = setup({ signedIn: true });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Notes" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Note body" }), { target: { value: "doomed draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Delete note" }));
+    await waitFor(() => expect(records["note:a"]).toBeUndefined());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+    expect(updateSent).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "Note body" })).toBeNull();
+  } finally {
+    window.confirm = prevConfirm;
+  }
+});
+
 const checkpoint: Checkpoint = {
   id: "c", schemaVersion: 1, createdAt: "2026-01-01", taskKey: "task", title: "Task",
   url: "https://example.com", adapter: "generic", pageText: "page", selectedText: "",
@@ -129,14 +178,44 @@ const checkpoint: Checkpoint = {
 
 it("offers full-code paste for a partial capture", () => {
   render(<ResumeView checkpoint={checkpoint} job={null} onSummarize={() => undefined} onCopyCode={() => undefined}
-    onOpenSource={() => undefined} busy={false} aiEnabled={false} onAiEnabled={() => undefined}
+    onOpenSource={() => undefined} busy={false}
     autoSummarize={false} onAutoSummarize={() => undefined} onPasteCode={async () => true} pasteError={null} />);
   expect(screen.getByText("Captured code is partial? Paste the full code")).toBeTruthy();
 });
 
+it("shows only the sign-in page until signed in", async () => {
+  setup();
+  render(<App />);
+  expect(await screen.findByText("Leave your work. Keep your place.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Sign in with Google" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Notes" })).toBeNull();
+});
+
+it("shows the recap button once signed in", async () => {
+  const { records } = setup();
+  records["checkpoint:c"] = { ...checkpoint };
+  records["summary:c"] = {
+    checkpointId: "c", requestId: null, status: "idle", startedAt: null,
+    includedNoteSnapshots: [], result: null, error: null, warnings: [],
+  };
+  const sessionStore: Record<string, unknown> = {
+    backendCredential: {
+      origin: "https://backtrack.martinalba.dev",
+      token: "id-token",
+      email: "person@gmail.com",
+      expiresAt: Date.now() + 3600000,
+    },
+  };
+  const storage = (globalThis as unknown as { chrome: { storage: { session: { get: (k: string) => Promise<unknown> } } } }).chrome.storage;
+  const session = { get: async (key: string) => ({ [key]: sessionStore[key] }) };
+  Object.assign(storage, { session });
+  render(<App />);
+  expect(await screen.findByRole("button", { name: "Generate recap" })).toBeTruthy();
+});
+
 it("disables History retry while AI is disabled", () => {
   const failedJob: SummaryJob = {
-    checkpointId: "c", requestId: "r", status: "failed", startedAt: "2026-01-01", inputHash: null,
+    checkpointId: "c", requestId: "r", status: "failed", startedAt: "2026-01-01",
     includedNoteSnapshots: [], result: null, error: { code: "HTTP_500", message: "Failed" }, warnings: [],
   };
   const retry = vi.fn();

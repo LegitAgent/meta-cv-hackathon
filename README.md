@@ -9,6 +9,7 @@ Help you resume unfinished work after an interruption without writing a handoff 
 - Saves the current page and available code as a local checkpoint.
 - Generates a Muse recap, grounded observations, and a suggested next action.
 - Keeps autosaving note tabs and checkpoint history in Chrome.
+- Switching browser tabs jumps to that tab's checkpoint. Capture a page first — tabs without a checkpoint are skipped.
 - Uses a Cloudflare Worker to call the direct Muse API, with authentication, rate limiting, validation, timeouts, and short-lived summary caching.
 
 Notes and checkpoints remain local. Content selected for AI is sent to the backend and the direct Muse API. Validated summaries may be cached at Cloudflare for five minutes; set CACHE_TTL_SECONDS=0 to disable this. Capture and notes work without AI.

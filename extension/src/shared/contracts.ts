@@ -67,10 +67,9 @@ export interface SummaryJob {
   requestId: string | null;
   status: SummaryStatus;
   startedAt: string | null;
-  inputHash: string | null;
   includedNoteSnapshots: NoteSnapshot[];
   result: Summary | null;
-  error: { code: string; message: string } | null;
+  error: { code: string; message: string; retryAfterSeconds?: number } | null;
   warnings: string[];
 }
 
@@ -122,7 +121,8 @@ export type WorkerCommand =
   | { type: "SUMMARY_BEGIN"; checkpointId: string; noteIds: string[] }
   | { type: "SUMMARY_COMPLETE"; checkpointId: string; requestId: string; result: Summary }
   | { type: "SUMMARY_FAIL"; checkpointId: string; requestId: string; error: { code: string; message: string } }
-  | { type: "CHECKPOINT_DELETE"; id: string };
+  | { type: "CHECKPOINT_DELETE"; id: string }
+  | { type: "CAPTURE" };
 
 export type WorkerResponse =
   | { ok: true; data: unknown }

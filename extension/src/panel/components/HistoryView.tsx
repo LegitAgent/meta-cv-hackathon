@@ -32,6 +32,7 @@ export function HistoryView({
     <div>
       <section className="card">
         <h3>Checkpoints</h3>
+        <p className="hint">Switching browser tabs jumps to that tab's checkpoint. Capture a page first to include it.</p>
         <ul className="history">
           {checkpoints.map((c) => {
             const job = summaries[c.id];

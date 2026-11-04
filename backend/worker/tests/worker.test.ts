@@ -86,6 +86,12 @@ describe("Worker gateway", () => {
     expect((await t.send(input(), { Authorization: "Bearer wrong" })).status).toBe(401);
     expect(t.fetcher).not.toHaveBeenCalled(); expect(t.cache.match).not.toHaveBeenCalled();
   });
+  it("tolerates extra whitespace after the Bearer scheme", async () => {
+    const t = setup();
+    const response = await t.send(input(), { Authorization: `Bearer  ${token}` });
+    expect(response.status).toBe(200);
+    expect(t.fetcher).toHaveBeenCalledTimes(1);
+  });
   it("fails closed when auth is not configured", async () => {
     const t = setup(); t.env.GOOGLE_CLIENT_ID = "";
     expect((await t.send()).status).toBe(503); expect(t.fetcher).not.toHaveBeenCalled();
@@ -135,6 +141,31 @@ describe("Worker gateway", () => {
     expect((await t.send()).status).toBe(502);
     t.fetcher.mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] })));
     expect((await t.send()).status).toBe(502); expect(t.cache.put).not.toHaveBeenCalled();
+  });
+  it("repairs fenced and slightly overlong model output instead of failing", async () => {
+    const t = setup();
+    const payload = {
+      recap: "r".repeat(1300),
+      observedFacts: [{ text: "  fact  ", sourceFields: "code" }, { text: "", sourceFields: [] }],
+      possibleBlocker: "",
+      nextAction: " Trace one input ",
+      uncertainties: ["", 42, "u"],
+    };
+    t.fetcher.mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "```json\n" + JSON.stringify(payload) + "\n```" } }] })));
+    const response = await t.send();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.summary.recap).toHaveLength(1200);
+    expect(body.summary.observedFacts).toEqual([{ text: "fact", sourceFields: ["code"] }]);
+    expect(body.summary.possibleBlocker).toBeNull();
+    expect(body.summary.nextAction).toBe("Trace one input");
+    expect(body.summary.uncertainties).toEqual(["u"]);
+  });
+  it("still rejects model output missing core content", async () => {
+    const t = setup();
+    t.fetcher.mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ recap: "", nextAction: "" }) } }] })));
+    expect((await t.send()).status).toBe(502);
+    expect(t.cache.put).not.toHaveBeenCalled();
   });
   it("can disable caching", async () => {
     const t = setup(); t.env.CACHE_TTL_SECONDS = "0";

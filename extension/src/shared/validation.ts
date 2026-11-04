@@ -55,12 +55,11 @@ export const summaryJobSchema = z.object({
   requestId: z.string().nullable(),
   status: z.enum(["idle", "pending", "complete", "failed"]),
   startedAt: z.string().nullable(),
-  inputHash: z.string().nullable(),
   includedNoteSnapshots: z
     .array(z.object({ id: z.string(), revision: z.number().int(), body: z.string().max(50000), kind: z.literal("codeOverride").optional(), linkedCheckpointId: z.string().nullable().optional() }))
     .max(20),
   result: summarySchema.nullable(),
-  error: z.object({ code: z.string(), message: z.string().max(1000) }).nullable(),
+  error: z.object({ code: z.string(), message: z.string().max(1000), retryAfterSeconds: z.number().int().nonnegative().optional() }).nullable(),
   warnings: z.array(z.string().max(500)).default([]),
 });
 
@@ -113,9 +112,10 @@ export const workerCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("SUMMARY_FAIL"),
     checkpointId: z.string().min(1),
     requestId: z.string().min(1),
-    error: z.object({ code: z.string().max(64), message: z.string().max(1000) }),
+    error: z.object({ code: z.string().max(64), message: z.string().max(1000), retryAfterSeconds: z.number().int().nonnegative().optional() }),
   }),
   z.object({ type: z.literal("CHECKPOINT_DELETE"), id: z.string().min(1) }),
+  z.object({ type: z.literal("CAPTURE") }),
 ]);
 
 export const backendSummaryResponseSchema = z.object({

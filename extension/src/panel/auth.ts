@@ -1,4 +1,36 @@
+import { useCallback, useEffect, useState } from "react";
+
 export interface Credential { origin: string; token: string; email: string; expiresAt: number }
+
+export function useCredential(origin: string, pollMs = 15000) {
+  const [credential, setCredential] = useState<Credential | null>(null);
+  const [ready, setReady] = useState(false);
+  const refresh = useCallback(async () => {
+    try {
+      setCredential(await getCredential(origin));
+    } catch {
+      setCredential(null);
+    } finally {
+      setReady(true);
+    }
+  }, [origin]);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const value = await getCredential(origin);
+        if (active) setCredential(value);
+      } catch {
+        if (active) setCredential(null);
+      } finally {
+        if (active) setReady(true);
+      }
+    })();
+    const timer = setInterval(() => { if (active) void refresh(); }, pollMs);
+    return () => { active = false; clearInterval(timer); };
+  }, [origin, pollMs, refresh]);
+  return { credential, ready, refresh };
+}
 const base64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const random = () => base64url(crypto.getRandomValues(new Uint8Array(32)));
 
@@ -9,9 +41,17 @@ export async function getCredential(origin: string): Promise<Credential | null> 
     ? backendCredential as Credential : null;
 }
 async function responseJson(response: Response) {
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || "Sign-in failed. Try again.");
-  return data;
+  // Proxy or error pages may not be JSON: never let a parse error mask the
+  // real failure.
+  let data: { error?: { code?: string; message?: string } } | null = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+  if (!response.ok) throw new Error(data?.error?.message || `Sign-in failed (status ${response.status}). Try again.`);
+  if (!data) throw new Error("Sign-in returned an unreadable response. Try again.");
+  return data as Record<string, unknown>;
 }
 export async function signIn(origin: string): Promise<Credential> {
   const config = await responseJson(await fetch(`${origin}/auth/config`, { signal: AbortSignal.timeout(15000) }));

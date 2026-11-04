@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "Leave your work. Keep your place.",
   "minimum_chrome_version": "116",
-  "permissions": ["activeTab", "scripting", "storage", "sidePanel", "identity"],
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel", "identity", "tabs"],
   "host_permissions": ["https://backtrack.martinalba.dev/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "Pause here" },
