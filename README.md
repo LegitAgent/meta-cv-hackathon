@@ -6,10 +6,17 @@ Help you resume unfinished work after an interruption without writing a handoff 
 
 ## What it does
 
-- Saves the current page and available code as a local checkpoint.
-- Generates a Muse recap, grounded observations, and a suggested next action.
-- Keeps autosaving note tabs and checkpoint history in Chrome.
-- Switching browser tabs jumps to that tab's checkpoint. Capture a page first — tabs without a checkpoint are skipped.
+- Saves the current tab as a local checkpoint from the toolbar or the in-panel **Save this page** / **Save again** button.
+- Shows capture quality as `complete`, `partial`, or `unavailable`, with missing, truncated, and warning details. See the in-panel **Wiki** popup.
+- Generates a Muse recap with grounded observations, a suggested next action, and labeled uncertainty.
+- Keeps tabs for Resume, Notes, History, plus a small Wiki popup with the quality table.
+- History has text search, quality and summary filters, newest/oldest/title sort, per-row **Trash** with inline `Delete` / `Keep`, and bulk **Trash selected** with an inline count confirm. No native `confirm()` dialogs. Deleting a checkpoint keeps linked notes.
+- Notes are global, not per-page. `linkedCheckpointId` is optional metadata; linking does not auto-include a note. Tick notes under **Notes to include** to send them.
+- Missing or partial code offers a paste-code fallback. Pasted code is saved as a linked `codeOverride` note and replaces captured code for the next recap only; the checkpoint stays immutable.
+- Summary states are `idle`, `pending`, `complete`, and `failed`. Failed recaps show the error, recap warnings, retry, and a 429 countdown when the backend sends `Retry-After`.
+- Recap card supports **Copy recap** and an observed-facts toggle.
+- Autosaving note tabs, workspace selection, activity history, Google sign-in, and JSON export.
+- Switching browser tabs jumps to that tab's checkpoint. Tabs without a checkpoint are skipped.
 - Uses a Cloudflare Worker to call the direct Muse API, with authentication, rate limiting, validation, timeouts, and short-lived summary caching.
 
 Notes and checkpoints remain local. Content selected for AI is sent to the backend and the direct Muse API. Validated summaries may be cached at Cloudflare for five minutes; set CACHE_TTL_SECONDS=0 to disable this. Capture and notes work without AI.
@@ -51,7 +58,7 @@ GOOGLE_CLIENT_SECRET="your-google-client-secret"
 ALLOWED_EXTENSION_ORIGINS="chrome-extension://your-extension-id"
 ```
 
-Set up a Google OAuth Web application client using [the Google sign-in guide](docs/google-sign-in.md). Only verified `@gmail.com` accounts can use AI. Keep `.dev.vars` private. The backend expects Bearer authentication from the direct Muse API and appends `/chat/completions` to AI_BASE_URL.
+Set up a Google OAuth Web application client using [the Google sign-in guide](docs/google-sign-in.md). Only verified `@gmail.com` accounts can use AI. Keep `.dev.vars` private. The backend expects Bearer [REDACTED] from the direct Muse API and appends `/chat/completions` to AI_BASE_URL.
 
 The nonsecret settings are in `backend/worker/wrangler.jsonc`:
 
@@ -74,6 +81,8 @@ Keep the terminal open. `http://127.0.0.1:8001/health` returns service status lo
 **3. Connect Backtrack**
 
 Open a webpage, click Backtrack, expand **Account**, and click **Sign in with Google**. Choose a Gmail account, enable AI, and generate a recap. Backtrack automatically connects to `https://backtrack.martinalba.dev`; users do not configure a backend URL. Your short-lived Google identity token stays in Chrome session storage. Sign in again after it expires or Chrome restarts. Never enter your Muse API key in the extension.
+
+In the panel, **Resume** handles capture, quality, source links, code copy, paste-code fallback, auto-summarize consent, recap, warnings, and retry. **Notes** handles tabs and saved notes. **History** handles checkpoint search, filters, sort, selection, trash, retry, and activity. **Wiki** explains the quality codes.
 
 The local Worker can still be tested directly at `http://127.0.0.1:8001`. The extension targets the hosted backend; testing it against a different origin requires a developer source change in `extension/src/shared/config.ts` and the matching manifest host permission, followed by a rebuild.
 
@@ -110,6 +119,8 @@ npm run build
 npm test
 npm run build
 ```
+
+Extension tests cover adapters, repository, payload, store, panel flows, history filter/sort/trash, auth, tab follow, and validation. Backend tests cover summaries and auth.
 
 - 401: sign in with Google again under Account.
 - 403: use a verified Gmail account and check the extension ID in ALLOWED_EXTENSION_ORIGINS.
