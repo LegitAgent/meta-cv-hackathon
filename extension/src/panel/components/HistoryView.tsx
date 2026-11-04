@@ -16,6 +16,7 @@ export function HistoryView({
   onSelect,
   onDelete,
   onRetry,
+  aiEnabled,
 }: {
   checkpoints: Checkpoint[];
   summaries: Record<string, SummaryJob>;
@@ -24,6 +25,7 @@ export function HistoryView({
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onRetry: (id: string) => void;
+  aiEnabled: boolean;
 }) {
   if (checkpoints.length === 0) return <div className="empty">No checkpoints yet.</div>;
   return (
@@ -46,7 +48,7 @@ export function HistoryView({
                 </span>
                 <span className="row">
                   {job?.status === "failed" && (
-                    <button className="link" onClick={() => onRetry(c.id)}>
+                    <button className="link" onClick={() => onRetry(c.id)} disabled={!aiEnabled} title={!aiEnabled ? "Enable AI in Resume to retry" : undefined}>
                       Retry
                     </button>
                   )}

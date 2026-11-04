@@ -34,6 +34,7 @@ export const noteSchema = z.object({
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   linkedCheckpointId: z.string().nullable(),
+  kind: z.literal("codeOverride").optional(),
 });
 
 export const observedFactSchema = z.object({
@@ -56,7 +57,7 @@ export const summaryJobSchema = z.object({
   startedAt: z.string().nullable(),
   inputHash: z.string().nullable(),
   includedNoteSnapshots: z
-    .array(z.object({ id: z.string(), revision: z.number().int(), body: z.string().max(10000) }))
+    .array(z.object({ id: z.string(), revision: z.number().int(), body: z.string().max(50000), kind: z.literal("codeOverride").optional(), linkedCheckpointId: z.string().nullable().optional() }))
     .max(20),
   result: summarySchema.nullable(),
   error: z.object({ code: z.string(), message: z.string().max(1000) }).nullable(),
@@ -78,6 +79,7 @@ export const workerCommandSchema = z.discriminatedUnion("type", [
     title: z.string().max(300),
     linkedCheckpointId: z.string().min(1).max(200).nullable().optional(),
     body: z.string().max(50000).optional(),
+    kind: z.literal("codeOverride").optional(),
   }),
   z.object({
     type: z.literal("NOTE_UPDATE"),

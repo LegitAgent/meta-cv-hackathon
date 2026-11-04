@@ -1,4 +1,4 @@
-import { LIMITS, type Checkpoint, type SummaryRequestPayload } from "./contracts";
+import { LIMITS, type Checkpoint, type NoteSnapshot, type SummaryRequestPayload } from "./contracts";
 
 /**
  * Build the summary request payload from the exact persisted inputs returned
@@ -12,12 +12,19 @@ import { LIMITS, type Checkpoint, type SummaryRequestPayload } from "./contracts
 export function buildSummaryPayload(
   checkpoint: Checkpoint,
   requestId: string,
-  snapshots: { id: string; revision: number; body: string }[],
+  snapshots: NoteSnapshot[],
 ): { payload: SummaryRequestPayload; warnings: string[] } {
   const warnings: string[] = [];
   const notes: { id: string; body: string }[] = [];
+  const overrides = snapshots.filter((s) => s.kind === "codeOverride" && s.linkedCheckpointId === checkpoint.id);
+  const codeOverride = overrides[overrides.length - 1];
+  if (overrides.length > 1) warnings.push("Multiple pasted code notes were selected; the last one is used as code.");
+  if (codeOverride && codeOverride.body.length > LIMITS.CODE_MAX) {
+    warnings.push(`Pasted code was trimmed to ${LIMITS.CODE_MAX.toLocaleString("en-US")} characters for the recap.`);
+  }
   let used = 0;
   for (const s of snapshots) {
+    if (s.kind === "codeOverride" && s.linkedCheckpointId === checkpoint.id) continue;
     const room = LIMITS.NOTES_TOTAL_MAX - used;
     if (room <= 0) {
       warnings.push(`Note "${s.id}" was left out: notes share a ${LIMITS.NOTES_TOTAL_MAX.toLocaleString("en-US")}-character recap budget.`);
@@ -42,9 +49,12 @@ export function buildSummaryPayload(
         title: checkpoint.title,
         pageText: checkpoint.pageText,
         selectedText: checkpoint.selectedText,
-        code: checkpoint.code,
+        code: codeOverride ? codeOverride.body.slice(0, LIMITS.CODE_MAX) : checkpoint.code,
         language: checkpoint.language,
-        quality: checkpoint.quality,
+        quality: codeOverride ? {
+          ...checkpoint.quality,
+          warnings: [...checkpoint.quality.warnings, "Code for this recap came from a pasted note and replaces captured code."],
+        } : checkpoint.quality,
       },
       notes,
     },

@@ -37,6 +37,7 @@ export function ResumeView({
   autoSummarize,
   onAutoSummarize,
   onPasteCode,
+  pasteError,
 }: {
   checkpoint: Checkpoint | null;
   job: SummaryJob | null;
@@ -48,7 +49,8 @@ export function ResumeView({
   onAiEnabled: (v: boolean) => void;
   autoSummarize: boolean;
   onAutoSummarize: (v: boolean) => void;
-  onPasteCode: (code: string) => void;
+  onPasteCode: (code: string) => Promise<boolean>;
+  pasteError: string | null;
 }) {
   const [paste, setPaste] = useState("");
   if (!checkpoint) return <div className="empty">No checkpoint yet. Click the toolbar button (“Pause here”) on any page.</div>;
@@ -67,9 +69,9 @@ export function ResumeView({
       {checkpoint.code && (
         <pre className="code">{checkpoint.code.slice(0, 4000)}</pre>
       )}
-      {!checkpoint.code && (
+      {(!checkpoint.code || checkpoint.quality.code === "partial") && (
         <details className="paste-box">
-          <summary>Code wasn’t captured? Paste it here</summary>
+          <summary>{checkpoint.code ? "Captured code is partial? Paste the full code" : "Code wasn’t captured? Paste it here"}</summary>
           <textarea
             rows={6}
             value={paste}
@@ -78,18 +80,16 @@ export function ResumeView({
           />
           <div className="row">
             <button
-              onClick={() => {
-                onPasteCode(paste);
-                setPaste("");
-              }}
+              onClick={() => void onPasteCode(paste).then((saved) => { if (saved) setPaste(""); })}
               disabled={!paste.trim()}
             >
               Attach pasted code
             </button>
           </div>
+          {pasteError && <div className="error" role="alert">{pasteError}</div>}
           <p className="hint">
-            Saved as a note linked to this checkpoint, auto-selected for the next recap. Notes share a
-            10,000-character recap budget; longer text is trimmed and the trim is labeled above.
+            Saved as a note linked to this checkpoint (maximum 50,000 characters). For the next recap, pasted code
+            replaces the captured code; content beyond 30,000 characters is trimmed with a warning. The saved checkpoint stays unchanged.
           </p>
         </details>
       )}

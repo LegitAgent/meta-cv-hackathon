@@ -89,9 +89,17 @@ describe("repository", () => {
     const { job, notes, checkpoint } = await repo.beginSummary("c3", [note.id]);
     await repo.updateNote(note.id, 1, "n", "v2");
     expect(checkpoint.id).toBe("c3");
-    expect(notes).toEqual([{ id: note.id, revision: 1, body: "v1" }]);
-    expect(job.includedNoteSnapshots).toEqual([{ id: note.id, revision: 1, body: "v1" }]);
+    expect(notes).toEqual([{ id: note.id, revision: 1, body: "v1", linkedCheckpointId: null }]);
+    expect(job.includedNoteSnapshots).toEqual([{ id: note.id, revision: 1, body: "v1", linkedCheckpointId: null }]);
     expect(job.requestId).toBeTruthy();
+  });
+
+  it("preserves a long note until the payload builder can report trimming", async () => {
+    const repo = new Repository(memArea());
+    await repo.createCheckpoint(cp("long"));
+    const note = await repo.createNote("long note", null, "x".repeat(15000));
+    const { notes } = await repo.beginSummary("long", [note.id]);
+    expect(notes[0].body).toHaveLength(15000);
   });
 
   it("late summary results do not overwrite newer jobs", async () => {

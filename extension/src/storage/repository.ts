@@ -103,7 +103,7 @@ export class Repository {
 
   // ---- notes (revision-guarded edits) ----
 
-  createNote(title: string, linkedCheckpointId: string | null = null, body = ""): Promise<Note> {
+  createNote(title: string, linkedCheckpointId: string | null = null, body = "", kind?: "codeOverride"): Promise<Note> {
     return this.enqueue(async () => {
       const t = nowIso();
       const note: Note = {
@@ -114,6 +114,7 @@ export class Repository {
         createdAt: t,
         updatedAt: t,
         linkedCheckpointId,
+        ...(kind ? { kind } : {}),
       };
       const ws = await this.getWorkspace();
       const openNoteIds = ws.openNoteIds.includes(note.id) ? ws.openNoteIds : [...ws.openNoteIds, note.id];
@@ -230,7 +231,13 @@ export class Repository {
       const prev = (got[keySummary(checkpointId)] as SummaryJob | undefined) ?? defaultSummaryJob(checkpointId);
       const snapshots = noteIds.flatMap((id) => {
         const n = got[keyNote(id)] as Note | undefined;
-        return n ? [{ id: n.id, revision: n.revision, body: n.body.slice(0, 10000) }] : [];
+        return n ? [{
+          id: n.id,
+          revision: n.revision,
+          body: n.body,
+          linkedCheckpointId: n.linkedCheckpointId,
+          ...(n.kind ? { kind: n.kind } : {}),
+        }] : [];
       });
       const job: SummaryJob = {
         checkpointId,

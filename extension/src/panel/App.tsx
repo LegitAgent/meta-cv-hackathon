@@ -25,6 +25,7 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busySummary, setBusySummary] = useState(false);
   const [includeNoteIds, setIncludeNoteIds] = useState<string[]>([]);
+  const [pasteError, setPasteError] = useState<string | null>(null);
   const autoRanFor = useRef<string | null>(null);
 
   // Panel owns the live note draft; storage is only updated on debounced save.
@@ -36,16 +37,17 @@ export default function App() {
   });
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [conflictNote, setConflictNote] = useState<Note | null>(null);
-  const [conflictText, setConflictText] = useState<{ title: string; body: string } | null>(null);
+  const [conflictText, setConflictText] = useState<{ id: string; title: string; body: string } | null>(null);
   const saveTimer = useRef<number | null>(null);
   // Per-note outbox: unsent edits keyed by originating note ID. Text can
   // never cross note boundaries because every send and every display merge
   // is keyed by the note the text was typed in.
   const outbox = useRef(new Map<string, PendingEdit>());
-  const savingRef = useRef(false);
+  const inFlightSave = useRef<Promise<boolean> | null>(null);
+  const conflictedNoteId = useRef<string | null>(null);
   // Refs keep the save path stable so timers never fire with a stale revision.
   const draftRef = useRef(draft);
-  const flushRef = useRef<() => Promise<void>>(async () => undefined);
+  const flushRef = useRef<() => Promise<boolean>>(async () => true);
   // AI consent and auto-summarize live in the persisted workspace, so a panel
   // reload never resets them.
   const aiEnabled = snap?.workspace.aiEnabled ?? false;
@@ -91,29 +93,24 @@ export default function App() {
   // and base revision; each response merges only into the matching display.
   // A completed save never clobbers typing that arrived while in flight, and
   // revision conflicts never auto-retry: the user resolves them explicitly.
-  const flushSave = useCallback(async () => {
+  const flushSave = useCallback(async (): Promise<boolean> => {
     if (saveTimer.current !== null) {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    if (savingRef.current) {
-      if (outbox.current.size > 0) {
-        saveTimer.current = window.setTimeout(() => void flushRef.current(), AUTOSAVE_MS);
-      }
-      return;
-    }
+    if (inFlightSave.current) return inFlightSave.current;
+    if (conflictedNoteId.current) return false;
     // Prefer the displayed note so visible feedback lands first.
     const curId = draftRef.current.id;
     let key: string | undefined;
     if (curId && outbox.current.has(curId)) key = curId;
     else key = outbox.current.keys().next().value as string | undefined;
-    if (key === undefined) return;
+    if (key === undefined) return true;
     const text = outbox.current.get(key);
-    if (!text) return;
+    if (!text) return true;
     outbox.current.delete(key);
-    savingRef.current = true;
     setSaveState("saving");
-    let conflicted = false;
+    const operation = (async (): Promise<boolean> => {
     try {
       const { note } = await sendCommand<{ note: Note }>({
         type: "NOTE_UPDATE",
@@ -122,6 +119,8 @@ export default function App() {
         title: text.title,
         body: text.body,
       });
+      const newer = outbox.current.get(note.id);
+      if (newer) outbox.current.set(note.id, { ...newer, baseRevision: note.revision });
       // Merge only into the matching display; other notes are untouched.
       // Newer same-note typing stays on screen under the new revision.
       setDraft((d) => {
@@ -132,13 +131,16 @@ export default function App() {
       if (shouldClaimSaved(outbox.current.size)) setSaveState("saved");
       setConflictNote(null);
       setConflictText(null);
+      return true;
     } catch (e) {
       const code = (e as Error & { code?: string }).code;
       if (code === "REVISION_CONFLICT") {
-        conflicted = true;
+        conflictedNoteId.current = key;
         // Hold the failed text for explicit resolution; it is NOT requeued,
         // so conflicts never retry on their own.
-        setConflictText({ title: text.title, body: text.body });
+        const latest = outbox.current.get(key) ?? text;
+        outbox.current.delete(key);
+        setConflictText({ id: key, title: latest.title, body: latest.body });
         const current = await chrome.storage.local
           .get([`note:${key}`])
           .then((g) => (g as Record<string, Note>)[`note:${key}`])
@@ -150,12 +152,16 @@ export default function App() {
         if (!outbox.current.has(key)) outbox.current.set(key, text);
         setSaveState("error");
       }
+      return false;
     } finally {
-      savingRef.current = false;
-      if (shouldRetrySave(conflicted, outbox.current.size > 0)) {
+      inFlightSave.current = null;
+      if (shouldRetrySave(Boolean(conflictedNoteId.current), outbox.current.size > 0)) {
         saveTimer.current = window.setTimeout(() => void flushRef.current(), AUTOSAVE_MS);
       }
     }
+    })();
+    inFlightSave.current = operation;
+    return operation;
   }, []);
 
   useEffect(() => {
@@ -170,6 +176,7 @@ export default function App() {
       const cur = draftRef.current;
       if (!cur.id) return;
       outbox.current.set(cur.id, { title: d.title, body: d.body, baseRevision: cur.baseRevision });
+      if (conflictedNoteId.current === cur.id) setConflictText({ id: cur.id, title: d.title, body: d.body });
       setDraft((prev) => ({ ...prev, title: d.title, body: d.body }));
       setSaveState((s) => (s === "saved" || s === "error" ? "saving" : s));
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
@@ -179,16 +186,17 @@ export default function App() {
   );
 
   // Drain every queued note before leaving it, so no text is left behind.
-  const drainOutbox = useCallback(async () => {
-    for (let guard = 0; guard < 50 && outbox.current.size > 0; guard++) {
-      await flushSave();
+  const drainOutbox = useCallback(async (): Promise<boolean> => {
+    for (let guard = 0; guard < 50 && (outbox.current.size > 0 || inFlightSave.current); guard++) {
+      if (!(await flushSave())) return false;
     }
+    return outbox.current.size === 0 && !inFlightSave.current && !conflictedNoteId.current;
   }, [flushSave]);
 
   // Flush on tab switch / explicit close.
   const selectNote = useCallback(
     async (id: string) => {
-      await drainOutbox();
+      if (!(await drainOutbox())) return;
       await sendCommand({ type: "WORKSPACE_UPDATE", fields: { activeNoteId: id } });
       const ws = snap?.workspace;
       if (ws && !ws.openNoteIds.includes(id)) {
@@ -207,7 +215,7 @@ export default function App() {
 
   const runSummary = useCallback(
     async (checkpointId: string) => {
-      if (busySummary) return;
+      if (busySummary || !aiEnabled) return;
       setBusySummary(true);
       try {
         const { job, payload } = await sendCommand<{
@@ -232,7 +240,7 @@ export default function App() {
         await refresh();
       }
     },
-    [busySummary, includeNoteIds, refresh, snap?.workspace.backendUrl],
+    [busySummary, aiEnabled, includeNoteIds, refresh, snap?.workspace.backendUrl],
   );
 
   const setAiEnabled = useCallback(
@@ -257,18 +265,29 @@ export default function App() {
   // Paste-code fallback: checkpoints are immutable, so pasted code becomes a
   // linked note that is auto-selected for the next summary.
   const pasteCode = useCallback(
-    async (checkpointId: string, code: string) => {
+    async (checkpointId: string, code: string): Promise<boolean> => {
       const checkpoint = snap?.checkpoints.find((c) => c.id === checkpointId);
-      const trimmed = code.slice(0, 50000);
-      if (!trimmed.trim()) return;
+      if (!code.trim()) return false;
+      if (code.length > 50000) {
+        setPasteError("Pasted code exceeds the 50,000-character note limit. Shorten it before saving.");
+        return false;
+      }
+      try {
       const { note } = await sendCommand<{ note: Note }>({
         type: "NOTE_CREATE",
         title: `Pasted code — ${checkpoint?.title ?? "checkpoint"}`.slice(0, 300),
         linkedCheckpointId: checkpointId,
-        body: trimmed,
+        body: code,
+        kind: "codeOverride",
       });
       setIncludeNoteIds((ids) => (ids.includes(note.id) ? ids : [...ids, note.id]));
+      setPasteError(null);
       await refresh();
+      return true;
+      } catch (e) {
+        setPasteError(e instanceof Error ? e.message : "Could not save pasted code.");
+        return false;
+      }
     },
     [refresh, snap?.checkpoints],
   );
@@ -336,7 +355,8 @@ export default function App() {
               if (!url || !/^https?:\/\//.test(url)) return;
               void chrome.tabs.create({ url });
             }}
-            onPasteCode={(code) => selectedCheckpoint && void pasteCode(selectedCheckpoint.id, code)}
+            onPasteCode={(code) => selectedCheckpoint ? pasteCode(selectedCheckpoint.id, code) : Promise.resolve(false)}
+            pasteError={pasteError}
           />
           <SummaryCard job={selectedJob} />
           <section className="card">
@@ -367,13 +387,13 @@ export default function App() {
           onSelect={(id) => void selectNote(id)}
           onCreate={() =>
             void (async () => {
-              await drainOutbox();
+              if (!(await drainOutbox())) return;
               await sendCommand({ type: "NOTE_CREATE", title: "Untitled note" });
               await refresh();
             })()
           }
           onClose={async (id) => {
-            await drainOutbox();
+            if (!(await drainOutbox())) return;
             await sendCommand({ type: "NOTE_CLOSE", id });
             await refresh();
           }}
@@ -398,17 +418,19 @@ export default function App() {
           onResolveConflict={async (keep) => {
             if (keep === "theirs" && conflictNote) {
               outbox.current.delete(conflictNote.id);
+              conflictedNoteId.current = null;
               setDraft({ id: conflictNote.id, title: conflictNote.title, body: conflictNote.body, baseRevision: conflictNote.revision });
               setConflictNote(null);
               setConflictText(null);
               setSaveState("saved");
-            } else if (keep === "mine" && draft.id && conflictNote && conflictText) {
+            } else if (keep === "mine" && conflictNote && conflictText) {
               // Explicit user choice: requeue over the newer revision.
-              outbox.current.set(draft.id, {
+              outbox.current.set(conflictText.id, {
                 title: conflictText.title,
                 body: conflictText.body,
                 baseRevision: conflictNote.revision,
               });
+              conflictedNoteId.current = null;
               setConflictNote(null);
               setConflictText(null);
               setSaveState("saving");
@@ -431,6 +453,7 @@ export default function App() {
             await refresh();
           }}
           onRetry={(id) => void runSummary(id)}
+          aiEnabled={aiEnabled}
         />
       )}
 

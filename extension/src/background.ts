@@ -202,7 +202,7 @@ async function captureTab(tabId: number, tabUrl: string): Promise<WorkerResponse
 async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
   switch (cmd.type) {
     case "NOTE_CREATE": {
-      const note = await repo.createNote(cmd.title, cmd.linkedCheckpointId ?? null, cmd.body ?? "");
+      const note = await repo.createNote(cmd.title, cmd.linkedCheckpointId ?? null, cmd.body ?? "", cmd.kind);
       return ok({ note });
     }
     case "NOTE_UPDATE": {
@@ -226,6 +226,8 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
     }
     case "SUMMARY_BEGIN": {
       try {
+        const workspace = await repo.getWorkspace();
+        if (!workspace.aiEnabled) return fail("AI_DISABLED", "Enable AI in Resume before generating a recap.");
         // The payload is built from the exact persisted snapshots returned
         // here. Live notes are never reread, so edits after this point
         // cannot change the request, and the request ID always matches

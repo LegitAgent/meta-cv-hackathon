@@ -36,12 +36,15 @@ export interface Note {
   createdAt: string;
   updatedAt: string;
   linkedCheckpointId: string | null;
+  kind?: "codeOverride";
 }
 
 export interface NoteSnapshot {
   id: string;
   revision: number;
   body: string;
+  kind?: "codeOverride";
+  linkedCheckpointId?: string | null;
 }
 
 export type SummaryStatus = "idle" | "pending" | "complete" | "failed";
@@ -111,7 +114,7 @@ export interface LastCapture {
 }
 
 export type WorkerCommand =
-  | { type: "NOTE_CREATE"; title: string; linkedCheckpointId?: string | null; body?: string }
+  | { type: "NOTE_CREATE"; title: string; linkedCheckpointId?: string | null; body?: string; kind?: "codeOverride" }
   | { type: "NOTE_UPDATE"; id: string; baseRevision: number; title: string; body: string }
   | { type: "NOTE_CLOSE"; id: string }
   | { type: "NOTE_DELETE"; id: string }
