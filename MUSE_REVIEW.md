@@ -33,7 +33,7 @@ Required: one in-flight save per note; associate responses with the originating 
 
 ### R3 — Medium: pasted code exceeds the backend note budget (fix in progress)
 
-Files: extension/src/panel/App.tsx; extension/src/background.ts; backend/schemas.py
+Files: extension/src/panel/App.tsx; extension/src/background.ts; former backend/schemas.py (removed; current backend schemas are in backend/worker/src/schemas.ts)
 
 Paste fallback accepts up to 50,000 characters and stores code as a note. buildSummaryPayload sends the entire note, but the API allows only 10,000 note characters in aggregate. Larger pasted code or several selected notes save locally but produce a 422 on summarization.
 

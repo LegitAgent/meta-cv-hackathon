@@ -10,16 +10,16 @@ Product requirements: [SPEC.md](SPEC.md). Target: an unpacked Chrome extension d
 | --- | --- |
 | Extension | Chrome Manifest V3, TypeScript |
 | Interface | React side panel, Vite build, plain CSS |
-| Validation | Zod at extension boundaries; Pydantic on backend |
+| Validation | Zod at extension and backend boundaries |
 | Persistence | chrome.storage.local; no account or remote database |
-| Backend | Separate FastAPI service with httpx for inference |
+| Backend | Cloudflare Worker with fetch for inference |
 | AI | Muse through one verified provider; Baseten is the initial integration target |
-| Testing | Vitest for state/adapters; pytest for API; manual Chrome integration checklist |
+| Testing | Vitest for state/adapters and Worker API; manual Chrome integration checklist |
 | Distribution | Load unpacked from extension/dist for the hackathon |
 
 Use a minimal Vite configuration with explicit entries for the panel and background worker. Build injected extraction functions into the worker bundle so executeScript can invoke self-contained functions. Do not load runtime code from a CDN.
 
-The existing camera app stays separate. Create backend/main.py and a small backend/requirements.txt rather than importing app.py and loading YOLO.
+The archived camera app stays separate. The backend lives in backend/worker and runs independently of the camera prototype.
 
 ## 2. Components and ownership
 
@@ -31,7 +31,7 @@ flowchart LR
     W --> S[chrome.storage.local]
     P[React side panel] -->|Typed commands| W
     S -->|Storage change events| P
-    P -->|Selected checkpoint only| B[FastAPI proxy]
+    P -->|Selected checkpoint only| B[Cloudflare Worker proxy]
     B --> M[Muse provider]
     M --> B
     B --> P
@@ -67,16 +67,17 @@ extension/
     panel/styles.css
   tests/
 backend/
-  main.py
-  schemas.py
-  provider.py
-  prompts.py
-  requirements.txt
-  .env.example
-  tests/
+  worker/
+    src/entry.ts
+    src/index.ts
+    src/schemas.ts
+    package.json
+    wrangler.jsonc
+    .dev.vars.example
+    tests/
 ```
 
-No backend .env or user exports should be committed.
+No backend .dev.vars or user exports should be committed.
 
 ## 4. Manifest and permission model
 

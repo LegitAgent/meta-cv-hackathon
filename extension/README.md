@@ -21,5 +21,5 @@ MV3 side-panel extension per `TECHNICAL_SPEC.md` sections 1–8, 11–13.
 
 ## Backend
 
-Use `../backend/worker/` (Cloudflare Worker; local URL `http://127.0.0.1:8001`). See the root README for direct Muse API secrets, local setup, and deployment. In the panel's Connection settings, save the backend URL and separate demo access token. The token is scoped to that origin and kept only in Chrome session storage. The older Python backend remains available for reference.
+Use `../backend/worker/` (Cloudflare Worker; local URL `http://127.0.0.1:8001`). See the root README for direct Muse API secrets, local setup, and deployment. In the panel's Connection settings, save the backend URL and separate demo access token. The token is scoped to that origin and kept only in Chrome session storage.
 

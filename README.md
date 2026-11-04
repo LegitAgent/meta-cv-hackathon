@@ -15,7 +15,7 @@ Notes and checkpoints remain local. Content selected for AI is sent to the backe
 
 ## Run locally
 
-Use Node.js 22 LTS or newer and Chrome. The current backend is `backend/worker`; the older Python backend is retained for reference and is not needed for this setup.
+Use Node.js 22 LTS or newer and Chrome. The backend is the Cloudflare Worker in `backend/worker`.
 
 **1. Build and load the extension**
 
@@ -127,4 +127,3 @@ npm run build
 - No network connection: confirm the local Worker is running or grant permission for the hosted URL.
 
 Implementation references: [Cloudflare rate limits](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/), [Cloudflare Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/).
-
