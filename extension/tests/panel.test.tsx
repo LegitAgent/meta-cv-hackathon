@@ -315,6 +315,24 @@ it("shows saved state with a save-again action when a checkpoint exists", async 
   expect(screen.queryByRole("button", { name: "Save this page" })).toBeNull();
 });
 
+it("ticking a folder checks its notes without locking them", async () => {
+  const { records } = setup({ signedIn: true });
+  records["folder:f1"] = { id: "f1", name: "sample", createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+  records["note:n1"] = { ...note("n1"), folderId: "f1" };
+  render(<App />);
+  const folderBox = (await screen.findByRole("checkbox", { name: "sample (1)" })) as HTMLInputElement;
+  const noteBox = screen.getByRole("checkbox", { name: "n1 (rev 0)" }) as HTMLInputElement;
+  expect(noteBox.checked).toBe(false);
+  fireEvent.click(folderBox);
+  expect(noteBox.checked).toBe(true);
+  expect(screen.getByText("1 of 2 selected")).toBeTruthy();
+  // The folder tick is a bulk action, not a lock: one note can opt back out.
+  fireEvent.click(noteBox);
+  expect(noteBox.checked).toBe(false);
+  expect(folderBox.checked).toBe(false);
+  expect(screen.getByText("0 of 2 selected")).toBeTruthy();
+});
+
 it("disables History retry while AI is disabled", () => {
   const failedJob: SummaryJob = {
     checkpointId: "c", requestId: "r", status: "failed", startedAt: "2026-01-01",

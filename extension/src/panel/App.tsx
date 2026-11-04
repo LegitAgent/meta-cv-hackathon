@@ -6,7 +6,7 @@ import { SignInPage } from "./components/SignInPage";
 import { signIn, useCredential } from "./auth";
 import { BACKEND_URL } from "../shared/config";
 import {
-  expandNoteSelection,
+  toggleFolderMembers,
   mergeSavedNote,
   resolveAdoptedDraft,
   sendCommand,
@@ -35,7 +35,6 @@ export default function App() {
   const [busySummary, setBusySummary] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [includeNoteIds, setIncludeNoteIds] = useState<string[]>([]);
-  const [includeFolderIds, setIncludeFolderIds] = useState<string[]>([]);
   const [noteFilter, setNoteFilter] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -308,10 +307,6 @@ export default function App() {
     return snap.notes.filter((n) => n.title.toLowerCase().includes(q));
   }, [snap, noteFilter]);
   const visibleIncludeIds = visibleIncludeNotes.map((n) => n.id);
-  const effectiveIncludeIds = useMemo(
-    () => expandNoteSelection(snap?.notes ?? [], includeNoteIds, includeFolderIds),
-    [snap, includeNoteIds, includeFolderIds],
-  );
 
   const selectedCheckpoint: Checkpoint | null = useMemo(() => {
     if (!snap) return null;
@@ -384,15 +379,10 @@ export default function App() {
   const runSummary = useCallback(
     async (checkpointId: string) => {
       if (busySummary || !aiEnabled || !signedIn || !credential) return;
-      // Drop ids for notes and folders deleted elsewhere; the worker would only warn.
+      // Drop ids for notes deleted elsewhere; the worker would only warn.
       const liveIds = new Set((snap?.notes ?? []).map((n) => n.id));
-      const liveFolderIds = new Set((snap?.folders ?? []).map((f) => f.id));
-      const keptNoteIds = includeNoteIds.filter((id) => liveIds.has(id));
-      if (keptNoteIds.length !== includeNoteIds.length) setIncludeNoteIds(keptNoteIds);
-      const keptFolderIds = includeFolderIds.filter((id) => liveFolderIds.has(id));
-      if (keptFolderIds.length !== includeFolderIds.length) setIncludeFolderIds(keptFolderIds);
-      // Tick a folder to include every note currently in it.
-      const noteIds = expandNoteSelection(snap?.notes ?? [], keptNoteIds, keptFolderIds);
+      const noteIds = includeNoteIds.filter((id) => liveIds.has(id));
+      if (noteIds.length !== includeNoteIds.length) setIncludeNoteIds(noteIds);
       setBusySummary(true);
       try {
         const { job, payload } = await sendCommand<{
@@ -420,7 +410,7 @@ export default function App() {
         await refresh();
       }
     },
-    [busySummary, aiEnabled, signedIn, credential, includeNoteIds, includeFolderIds, snap?.notes, snap?.folders, refresh],
+    [busySummary, aiEnabled, signedIn, credential, includeNoteIds, snap?.notes, refresh],
   );
 
   const setAiEnabled = useCallback(
@@ -593,22 +583,24 @@ export default function App() {
           <SummaryCard job={selectedJob} />
           <section className="card notes-include">
             <h3>Notes to include</h3>
-            <p className="hint">Linking a note does not include it automatically. Select notes explicitly, or tick a folder to include all its notes.</p>
+            <p className="hint">Linking a note does not include it automatically. Select notes explicitly, or tick a folder to check all its notes at once — untick any note to leave just that one out.</p>
             {snap.folders.length > 0 && (
               <div className="row" role="group" aria-label="Include folders">
                 {snap.folders.map((f) => {
-                  const count = snap.notes.filter((n) => n.folderId === f.id).length;
+                  const memberIds = snap.notes.filter((n) => n.folderId === f.id).map((n) => n.id);
+                  const included = memberIds.filter((id) => includeNoteIds.includes(id)).length;
                   return (
-                    <label key={f.id} className="check" title={count === 0 ? "No notes in this folder" : `Include all ${count} notes in ${f.name}`}>
+                    <label key={f.id} className="check" title={memberIds.length === 0 ? "No notes in this folder" : `Check all ${memberIds.length} notes in ${f.name}`}>
                       <input
                         type="checkbox"
-                        checked={includeFolderIds.includes(f.id)}
-                        disabled={count === 0}
-                        onChange={(e) =>
-                          setIncludeFolderIds((ids) => (e.target.checked ? [...ids, f.id] : ids.filter((x) => x !== f.id)))
-                        }
+                        checked={memberIds.length > 0 && included === memberIds.length}
+                        ref={(el) => {
+                          if (el) el.indeterminate = included > 0 && included < memberIds.length;
+                        }}
+                        disabled={memberIds.length === 0}
+                        onChange={(e) => setIncludeNoteIds((ids) => toggleFolderMembers(ids, memberIds, e.target.checked))}
                       />
-                      {f.name} ({count})
+                      {f.name} ({memberIds.length})
                     </label>
                   );
                 })}
@@ -650,7 +642,7 @@ export default function App() {
                   <button onClick={() => void createNoteForRecap()} title="Create a note and add it to this recap">
                     + Note
                   </button>
-                  <span className="meta">{effectiveIncludeIds.length} of {snap.notes.length} selected</span>
+                  <span className="meta">{snap.notes.filter((n) => includeNoteIds.includes(n.id)).length} of {snap.notes.length} selected</span>
                 </div>
               </>
             )}
@@ -715,7 +707,6 @@ export default function App() {
             await refresh();
           }}
           onDeleteFolder={async (id) => {
-            setIncludeFolderIds((ids) => ids.filter((x) => x !== id));
             await sendCommand({ type: "FOLDER_DELETE", id });
             await refresh();
           }}

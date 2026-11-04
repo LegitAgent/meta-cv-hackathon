@@ -1,24 +1,18 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { expandNoteSelection } from "../src/panel/store";
-import type { Note } from "../src/shared/contracts";
+import { toggleFolderMembers } from "../src/panel/store";
 
-function note(id: string, folderId: string | null): Note {
-  return { id, revision: 0, title: id, body: "b", createdAt: "t", updatedAt: "t", linkedCheckpointId: null, folderId };
-}
-
-describe("expandNoteSelection", () => {
-  it("unions direct picks with folder contents without duplicates", () => {
-    const notes = [note("a", "f1"), note("b", "f1"), note("c", null)];
-    expect(expandNoteSelection(notes, ["a", "c"], ["f1"]).sort()).toEqual(["a", "b", "c"]);
+describe("toggleFolderMembers", () => {
+  it("checks every folder member without duplicates", () => {
+    expect(toggleFolderMembers(["a"], ["a", "b"], true).sort()).toEqual(["a", "b"]);
   });
 
-  it("ignores unknown folders and keeps unknown ids for the worker to report", () => {
-    expect(expandNoteSelection([note("a", "f1")], ["ghost"], ["nope"])).toEqual(["ghost"]);
+  it("clears only folder members, keeping other picks", () => {
+    expect(toggleFolderMembers(["a", "b", "c"], ["b"], false)).toEqual(["a", "c"]);
   });
 
-  it("resolves against live folder membership at send time", () => {
-    expect(expandNoteSelection([note("a", null)], [], ["f1"])).toEqual([]);
-    expect(expandNoteSelection([note("a", "f1")], [], ["f1"])).toEqual(["a"]);
+  it("is a no-op for an empty folder", () => {
+    expect(toggleFolderMembers(["a"], [], true)).toEqual(["a"]);
+    expect(toggleFolderMembers(["a"], [], false)).toEqual(["a"]);
   });
 });

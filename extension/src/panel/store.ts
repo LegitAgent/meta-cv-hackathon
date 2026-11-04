@@ -22,14 +22,6 @@ export interface PanelSnapshot {
 /** Expand folder picks to note ids. Notes inside several picked folders (or
 picked directly) are included once; unknown ids pass through for the worker
 to report as missing. */
-export function expandNoteSelection(notes: Note[], noteIds: string[], folderIds: string[]): string[] {
-  const picked = new Set(folderIds);
-  const fromFolders = notes
-    .filter((n) => n.folderId != null && picked.has(n.folderId))
-    .map((n) => n.id);
-  return Array.from(new Set([...noteIds, ...fromFolders]));
-}
-
 function isLastCapture(value: unknown): value is LastCapture {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
@@ -97,6 +89,16 @@ export function shouldRetrySave(conflicted: boolean, hasPending: boolean): boole
 /** "Saved" is honest only when no unsent text remains. */
 export function shouldClaimSaved(outboxSize: number): boolean {
   return outboxSize === 0;
+}
+
+/**
+ * Folder tick is a bulk action on individual note ids, not a lock: ticking
+ * checks every current member, unticking clears them, and notes stay
+ * independently toggleable afterwards.
+ */
+export function toggleFolderMembers(includeIds: string[], memberIds: string[], checked: boolean): string[] {
+  if (checked) return Array.from(new Set([...includeIds, ...memberIds]));
+  return includeIds.filter((id) => !memberIds.includes(id));
 }
 
 export function mergeSavedNote(
