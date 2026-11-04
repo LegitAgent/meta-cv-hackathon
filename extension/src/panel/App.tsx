@@ -19,6 +19,7 @@ import { ResumeView, SummaryCard, getResumeStack } from "./components/ResumeView
 import { NoteTabs, type SaveState } from "./components/NoteTabs";
 import { HistoryView } from "./components/HistoryView";
 import { WikiHelp } from "./components/WikiHelp";
+import { openExistingOrNewTab } from "./reopen";
 
 type View = "resume" | "notes" | "history";
 
@@ -307,14 +308,15 @@ export default function App() {
     [snap?.checkpoints, selectedCheckpoint?.id, selectedCheckpoint?.taskKey],
   );
 
-  // Reopen never mutates saved code: it opens the URL and logs one
-  // checkpoint.resumed event. Falls back to copying the URL when tabs
-  // cannot be created (e.g. permissions or test environments).
+  // Reopen never mutates saved code: it focuses the tab the checkpoint came
+  // from when that tab is still open, otherwise opens the URL in a new tab,
+  // and logs one checkpoint.resumed event. Falls back to copying the URL
+  // when tabs cannot be touched (e.g. permissions or test environments).
   const openCheckpoint = useCallback(
     async (c: Checkpoint) => {
-      if (!c.url || !/^https?:\/\//.test(c.url)) return;
       try {
-        await chrome.tabs.create({ url: c.url });
+        const outcome = await openExistingOrNewTab(chrome.tabs, chrome.windows, c.url);
+        if (outcome === "invalid") return;
       } catch {
         try {
           await navigator.clipboard.writeText(c.url);
@@ -332,6 +334,16 @@ export default function App() {
     [refresh],
   );
 
+  // New note from Resume: created open + active, pre-selected for the recap,
+  // then shown immediately so the user can type into it.
+  const createNoteForRecap = useCallback(async () => {
+    if (!(await drainOutbox())) return;
+    const { note } = await sendCommand<{ note: Note }>({ type: "NOTE_CREATE", title: "Untitled note" });
+    setIncludeNoteIds((ids) => (ids.includes(note.id) ? ids : [...ids, note.id]));
+    await refresh();
+    setView("notes");
+  }, [drainOutbox, refresh]);
+
   // Explicit in-panel capture ("Save this page"): the only way checkpoints
   // are created. Failures surface through the persisted lastCapture banner.
   const captureNow = useCallback(async (stuckPoint: string) => {
@@ -341,9 +353,12 @@ export default function App() {
       await sendCommand({ type: "CAPTURE", ...(trimmed ? { stuckPoint: trimmed } : {}) });
     } catch {
       // The worker records the outcome; the panel shows it.
+    } finally {
+      // Always re-enable Save: a failed save on a restricted tab must never
+      // wedge the button on "Saving…" and force a reload to save other tabs.
+      setCapturing(false);
     }
     await refresh();
-    setCapturing(false);
   }, [refresh]);
 
   const runSummary = useCallback(
@@ -480,7 +495,10 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>Backtrack</h1>
+        <h1>
+          <img className="brand-mark" src="icons/icon48.png" alt="" width={20} height={20} />
+          Backtrack
+        </h1>
         <nav>
           {(["resume", "notes", "history"] as View[]).map((v) => (
             <button key={v} className={view === v ? "active" : ""} onClick={() => setView(v)}>
@@ -528,7 +546,14 @@ export default function App() {
           <section className="card notes-include">
             <h3>Notes to include</h3>
             <p className="hint">Linking a note does not include it automatically. Select notes explicitly.</p>
-            {snap.notes.length === 0 && <div className="empty">No notes yet.</div>}
+            {snap.notes.length === 0 && (
+              <div className="empty">
+                No notes yet.{" "}
+                <button className="link" onClick={() => void createNoteForRecap()}>
+                  + Note
+                </button>
+              </div>
+            )}
             {snap.notes.length > 0 && (
               <>
                 <div className="row">
@@ -553,6 +578,9 @@ export default function App() {
                     title="Clear filtered notes"
                   >
                     Clear
+                  </button>
+                  <button onClick={() => void createNoteForRecap()} title="Create a note and add it to this recap">
+                    + Note
                   </button>
                   <span className="meta">{includeNoteIds.length} of {snap.notes.length} selected</span>
                 </div>

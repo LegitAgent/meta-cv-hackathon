@@ -132,7 +132,10 @@ async function captureTab(tabId: number, tabUrl: string, stuckPoint: string | nu
     } catch {
       // Fall through to the generic denial below.
     }
-    return fail("SCRIPT_DENIED", "The page denied access for capture. Existing saved work is untouched.");
+    // Reachable when the page itself refused injection: Chrome only grants
+    // access to the tab where the toolbar button was clicked, so saving from
+    // the panel on a different tab is denied here.
+    return fail("TAB_ACCESS_DENIED", "Backtrack can only read the tab where its toolbar button was clicked. Click the toolbar button while viewing this page, then press Save this page. Existing saved work is untouched.");
   }
   if (!generic) return fail("EXTRACTION_EMPTY", "Nothing could be read from this page. Existing saved work is untouched.");
 
@@ -437,7 +440,20 @@ async function runCaptureFlow(tabId: number, tabUrl: string, stuckPoint: string 
     return fail("WORKER_ERROR", e instanceof Error ? `Storage failed to initialize: ${e.message}` : "Storage failed to initialize.");
   }
   await chrome.storage.local.set({ "meta:capturing": { at: nowIso(), tabId } }).catch(() => undefined);
-  const result = await captureTab(tabId, tabUrl, stuckPoint);
+  // Never let an unexpected throw escape: a stuck "meta:capturing" flag or a
+  // missing lastCapture would leave the panel unable to save again without a
+  // reload. Convert surprises into a failure outcome like any other.
+  let result: WorkerResponse;
+  try {
+    result = await captureTab(tabId, tabUrl, stuckPoint);
+  } catch (e) {
+    result = fail(
+      "CAPTURE_FAILED",
+      e instanceof Error
+        ? `Capture failed unexpectedly (${e.message}). Existing saved work is untouched.`
+        : "Capture failed unexpectedly. Existing saved work is untouched.",
+    );
+  }
   await chrome.storage.local.remove(["meta:capturing"]).catch(() => undefined);
   if (result.ok) {
     const data = result.data as { checkpoint?: { id?: string } };

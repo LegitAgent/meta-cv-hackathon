@@ -123,6 +123,15 @@ describe("capture edge cases", () => {
     expect(response.error.message).toContain("Allow access to file URLs");
   });
 
+  it("explains the toolbar-click grant when a normal page denies injection", async () => {
+    const { executeScript, send } = setup("https://example.com/sheet", ["https://example.com/sheet"]);
+    executeScript.mockRejectedValueOnce(new Error("denied"));
+    await import("../src/background");
+    const response = await send({ type: "CAPTURE" }) as unknown as CaptureFailure;
+    expect(response.ok).toBe(false);
+    expect(response.error.code).toBe("TAB_ACCESS_DENIED");
+  });
+
   it("discards a capture when the tab navigates after extraction", async () => {
     const { send } = setup(undefined, [undefined, "https://example.com/other"]);
     await import("../src/background");
@@ -156,6 +165,38 @@ describe("capture edge cases", () => {
     const response = await send({ type: "CAPTURE" }) as unknown as CaptureFailure;
     expect(response.ok).toBe(false);
     expect(response.error.code).toBe("NAVIGATION_RACE");
+  });
+
+  it("saves other tabs after a restricted-tab failure without a reload", async () => {
+    const { records, send } = setup(undefined, ["chrome://extensions/", undefined]);
+    await import("../src/background");
+    const failed = await send({ type: "CAPTURE" });
+    expect(failed.ok).toBe(false);
+    expect((failed as unknown as CaptureFailure).error.code).toBe("UNSUPPORTED_PAGE");
+    // No stuck flag, failure recorded, and the next tab saves normally.
+    expect(records["meta:capturing"]).toBeUndefined();
+    expect((records["meta:lastCapture"] as { ok: boolean }).ok).toBe(false);
+    const retry = await send({ type: "CAPTURE" });
+    expect(retry.ok).toBe(true);
+    expect((records["meta:lastCapture"] as { ok: boolean }).ok).toBe(true);
+    expect(records["meta:capturing"]).toBeUndefined();
+  });
+
+  it("records a failure instead of wedging when a workspace write throws", async () => {
+    const { records, send } = setup(undefined);
+    await import("../src/background");
+    const local = (globalThis as unknown as { chrome: { storage: { local: {
+      set: (items: Record<string, unknown>, callback?: () => void) => Promise<unknown>;
+    } } } }).chrome.storage.local;
+    const realSet = local.set.bind(local);
+    local.set = ((items: Record<string, unknown>, callback?: () => void) => {
+      if ("workspace" in items) throw new Error("boom");
+      return realSet(items, callback);
+    }) as typeof local.set;
+    const response = await send({ type: "CAPTURE" });
+    expect(response.ok).toBe(false);
+    expect(records["meta:capturing"]).toBeUndefined();
+    expect((records["meta:lastCapture"] as { ok: boolean }).ok).toBe(false);
   });
 
   it("trims an overlong stuck point and flags it", async () => {

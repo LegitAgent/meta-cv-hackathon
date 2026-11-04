@@ -91,12 +91,9 @@ header h1 {
   gap: 8px;
 }
 
-header h1::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--green);
+header h1 .brand-mark {
+  width: 20px;
+  height: 20px;
   flex: none;
 }
 
@@ -635,12 +632,9 @@ select {
   gap: 10px;
 }
 
-.signin-hero h1::before {
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--green);
+.signin-hero .brand-mark {
+  width: 28px;
+  height: 28px;
 }
 
 .signin-hero .tagline {

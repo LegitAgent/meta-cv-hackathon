@@ -190,6 +190,20 @@ it("filters the recap note list and bulk-selects only the visible notes", async 
   expect(checked()).toHaveLength(1);
 });
 
+it("creates a note from Resume pre-selected for the recap", async () => {
+  const { records } = setup({ signedIn: true });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "+ Note" }));
+  await waitFor(() => expect(records["note:b"]).toBeDefined());
+  expect(await screen.findByRole("textbox", { name: "Note body" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+  const boxes = Array.from(
+    document.querySelectorAll(".notes-include .check input"),
+  ) as HTMLInputElement[];
+  expect(boxes).toHaveLength(2);
+  expect(boxes.filter((b) => b.checked)).toHaveLength(1);
+});
+
 it("deleting a note drops its pending autosave instead of retrying it", async () => {
   const { records, updateSent } = setup({ signedIn: true });
   render(<App />);

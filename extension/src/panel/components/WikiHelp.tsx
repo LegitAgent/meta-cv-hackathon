@@ -9,6 +9,7 @@ const ARTICLES = [
     body: [
       "Press Save this page to capture the current tab as a checkpoint. Optionally type where you are stuck first; it is stored with the checkpoint so the recap knows what you were wrestling with. Saving captures the page text, your selected text, editor code when it can be read, and a small screenshot.",
       "After saving you will see a Saved mark with the capture time. Press Save again to store a fresh checkpoint; earlier ones are kept, never overwritten. Pages that cannot be captured, such as browser settings pages, explain why instead of saving. Switching browser tabs jumps to that tab's checkpoint, so capture a page first to include it.",
+      "Browsers only let Backtrack read the tab where you clicked its toolbar button, so click the icon on the tab you want to save first. One click covers that tab until it reloads or navigates away. If a save ever complains about access, clicking the icon on that tab again fixes it.",
     ],
   },
   {

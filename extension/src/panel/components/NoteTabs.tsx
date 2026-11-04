@@ -283,8 +283,16 @@ function NoteEditor({
         <button className="link" title="Bulleted list" aria-label="Bulleted list" onClick={() => applyFormat(toggleBullets)}>List</button>
         <button className="link" aria-pressed={preview} onClick={() => setPreview((v) => !v)}>{preview ? "Edit" : "Preview"}</button>
         {recognitionSupported && (listening
-          ? <button className="link" aria-label="Stop dictation" onClick={toggleDictation}>Stop</button>
-          : <button className="link" aria-label="Dictate note" onClick={toggleDictation}>Dictate</button>)}
+          ? <button className="link" aria-label="Stop dictation" title="Stop dictation" onClick={toggleDictation}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ verticalAlign: "-3px" }}>
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            </button>
+          : <button className="link" aria-label="Dictate note" title="Dictate note" onClick={toggleDictation}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ verticalAlign: "-3px" }}>
+                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h4v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+              </svg>
+            </button>)}
       </div>
       {listening && (
         <p className="hint" role="status">
