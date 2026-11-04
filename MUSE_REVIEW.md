@@ -9,7 +9,7 @@ R1–R6 below describe the original findings. The current checkout addresses the
 - R5: the panel and worker check persisted AI enablement; History disables Retry when AI is off.
 - R6: partial-code captures offer a full-code paste option.
 
-Validation: 45 extension tests, production build, and 9 backend tests pass. Live Chrome interaction and provider inference still require a configured provider and manual verification.
+Validation: 136 extension tests across 22 files, production build, and 53 backend tests across 2 files pass; both typechecks clean. Live Chrome interaction and provider inference still require a configured provider and manual verification.
 
 Codex maintains this file while monitoring source changes. Read it before each implementation batch. User authorized sharing review findings through this file. Do not treat a passing helper test as verification of the corresponding UI workflow.
 
@@ -267,8 +267,30 @@ Fixed: B12 (case-insensitive Bearer + test), B13 (upstream body cap + parse mapp
 
 Rejected with rationale: B29 (clearing result would destroy the SPEC §9 guarantee that a failed retry preserves the last good recap), B35 (fixed backend URL is intentional; stored values are ignored by design), B38 (auto-run already uses the live selection via its runSummary dep; empty selection is the explicit-selection rule, not a bug). Q13/Q14 deferred: no lockstep upgrades without running both suites; recorded in TECHNICAL_SPEC §12.
 
+Live-collision note (2026-11-05): the tree is being edited by another party mid-session. A history-layout fix (container queries, fluid rows, ellipsis titles, filter grid) is complete, but `tsc` is currently red on their half-applied ResumeView edit: `onCapture` compared to `false` (91), `copyError` (144) and `aiEnabled` (206) used but not destructured. Left untouched to avoid colliding; finish that edit, then re-run typecheck plus `npm test`.
+
 Follow-up fix (user-reported stuck SCRIPT_DENIED banner): B22 revisited and fixed properly. The banner clear sat after early returns in syncSelectionToTab, so unreadable URLs or missing task keys trapped it. The clear is now a standalone clearFailureBanner that runs before any early return, on every tab switch and on every finished navigation regardless of readability or active-tab status; selection syncing keeps its active-tab guard. The banner also gained a manual Dismiss button. Regression test: banner clears on navigation even when the tab cannot be read. Typecheck clean; extension tests could not run in this session (sandbox blocks the runner, escalation unavailable) — run `npm test` in `extension/` to confirm.
 
 Regression caught by the suite: the first B42 attempt (span→button) broke 4 panel tests that query `span[title='Double-click to rename']`. Reworked to a focusable span with Enter/Space/F2 handling, keeping the contract. Full extension suite now 127/127 across 20 files; backend 48/48; both typechecks clean.
 
 Flakiness note (pre-existing, intermittent): 4 autosave-timing tests in `panel.test.tsx` failed under parallel file execution in two runs (before and after this fix pass) but pass alone, serially, and in a later parallel re-run (127/127). Load-based flakiness in the tests, not a regression; re-run on failure before treating it as a break.
+
+---
+
+# Note folders — 2026-11-05 (feature)
+
+Notes can live in named folders (`folder:<uuid>` records, `Note.folderId`, unfiled = null). Notes view has a Folders card (create/rename/delete with inline confirm; delete keeps notes as Unfiled), a folder dropdown filter, per-note folder selects, and folder names on saved rows. Resume's **Notes to include** shows folder checkboxes with live counts (empty folders disabled); ticking a folder expands to all its notes at send time via `expandNoteSelection`, so moves are resolved live and duplicates collapse. New commands `FOLDER_CREATE/RENAME/DELETE` + `NOTE_MOVE` (metadata-only, no revision bump, missing folder → `FOLDER_NOT_FOUND`); reconcile unfiles notes whose folder is gone. Covered by repository folder tests, reconcile test, `expandNoteSelection` tests, and a folders UI test. Extension `tsc` clean; full suite could not run in this session (sandbox blocks the runner, escalation unavailable) — run `npm test` in `extension/`.
+
+## Scan — November 5, 2026 (safe-fix pass, user-requested)
+
+Scope was entire repo; fixes limited to safe defects (bugs, dead ends, stale copy) plus missing test coverage. No redesigns, refactors, or permission changes. Every item below was verified against current source before editing; extension suite 136/136 across 22 files, backend 53/53 across 2 files, both typechecks and the production build clean afterward.
+
+Fixed (panel): conflict-path deadlock when the note fetch fails left the save lock set with no banner and blocked all future saves — the lock now clears with an error state (App.tsx). History select and the AI auto-sync effect had unhandled rejections; both surface an action error now. Bulk delete aborted on the first failure without refreshing; per-id try/catch always refreshes and reports the count. Export clicked a detached anchor; it is appended and removed now. A failed capture wiped the typed stuck-point text; it is kept unless the save succeeds (captureNow returns boolean). Copy-code failures were swallowed; they render a role=alert error. The recap button was silently dead with AI disabled; it disables with a hint. Saved notes had no empty-filter state. Rename Enter+unmount-blur fired NOTE_UPDATE twice; Enter now defers to blur for a single commit. The resume note count over-reported until the next recap; deleted ids are pruned on snapshot change. Paste errors persisted across checkpoints; cleared on selection change. Duplicate-text list keys could collide and an empty facts toggle rendered; keys are positional and the toggle hides when empty (ResumeView/SummaryCard quality lists). The timeout message hardcoded 45s; it interpolates the configured deadline (api.ts).
+
+Fixed (worker/capture/storage): stale BODY_BYTES_MAX comment removed (contracts.ts). The early UNSUPPORTED_PAGE return omitted the file-access hint the denied path has; appended (background.ts). Trailing-slash task keys forked one page into two (false NAVIGATION_RACE, lost tab-follow selection); canonicalized in taskKeyForUrl with tolerant matching plus normalized race comparison (types.ts, background.ts). workspaceSchema required backendUrl that reconcile never persists; now optional with BACKEND_URL default (validation.ts). FileReader does not exist in MV3 service workers so screenshot downscaling always failed; blobToDataUrl uses arrayBuffer + chunked btoa (screenshot.ts).
+
+Fixed (docs): TECHNICAL_SPEC still named Baseten (direct Muse API instead); README had the Bearer direction backwards (backend sends, not expects); noted here for the record.
+
+Tests added, no product change: worker-command branch coverage (NOTE_*/WORKSPACE_UPDATE/SUMMARY_*/CHECKPOINT_DELETE/RESUMED/INVALID_COMMAND) in background-capture.test.ts; screenshot passthrough/invalid cases in screenshot.test.ts; live-route coverage (health, auth config + 503, 404, 405 + Allow, 415/400 sign-in posts, overlong Bearer) in backend worker.test.ts.
+
+Not done: UNTRUSTED_SENDER has no branch test (the shared send helper always passes a trusted sender; changing it risks the existing capture tests). Live-Chrome and real provider inference remain unverified (no credentials in scope).

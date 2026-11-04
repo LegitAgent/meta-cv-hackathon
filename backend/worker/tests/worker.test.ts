@@ -250,3 +250,54 @@ describe("Worker gateway", () => {
     } finally { vi.useRealTimers(); }
   });
 });
+
+describe("live routes", () => {
+  const call = (t: ReturnType<typeof setup>, url: string, init?: RequestInit, env?: Env) =>
+    t.handler(new Request(url, init), env ?? t.env, t.ctx);
+  const origin = { Origin: "chrome-extension://test" };
+
+  it("serves health with provider status", async () => {
+    const t = setup();
+    const response = await call(t, "https://api.example/health", { headers: origin });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok", providerConfigured: true });
+  });
+
+  it("serves auth config or 503 when unconfigured", async () => {
+    const t = setup();
+    const response = await call(t, "https://api.example/auth/config", { headers: origin });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ clientId: "client.apps.googleusercontent.com" });
+    const bare = await call(t, "https://api.example/auth/config", { headers: origin }, { ...t.env, GOOGLE_CLIENT_ID: "", GOOGLE_CLIENT_SECRET: "" });
+    expect(bare.status).toBe(503);
+    expect(await bare.json()).toMatchObject({ error: { code: "AUTH_NOT_CONFIGURED" } });
+  });
+
+  it("rejects unknown routes and wrong methods with Allow", async () => {
+    const t = setup();
+    expect((await call(t, "https://api.example/nope", { headers: origin })).status).toBe(404);
+    const method = await call(t, "https://api.example/api/v1/summaries", { headers: origin });
+    expect(method.status).toBe(405);
+    expect(method.headers.get("Allow")).toContain("POST");
+  });
+
+  it("rejects non-JSON and malformed sign-in posts", async () => {
+    const t = setup();
+    const plain = await call(t, "https://api.example/auth/google", {
+      method: "POST", headers: { ...origin, "Content-Type": "text/plain" }, body: "{}",
+    });
+    expect(plain.status).toBe(415);
+    const malformed = await call(t, "https://api.example/auth/google", {
+      method: "POST", headers: { ...origin, "Content-Type": "application/json" }, body: "{",
+    });
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ error: { code: "INVALID_AUTH_REQUEST" } });
+  });
+
+  it("rejects overlong bearer tokens before verification", async () => {
+    const t = setup();
+    const response = await t.send(input(), { Authorization: `Bearer ${"x".repeat(8193)}` });
+    expect(response.status).toBe(401);
+    expect(t.fetcher).not.toHaveBeenCalled();
+  });
+});

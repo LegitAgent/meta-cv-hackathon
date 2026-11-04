@@ -62,6 +62,7 @@ Opening a URL does not restore the website's editor state. Preserve code as a sn
 - Closing a tab hides it; a saved-notes list can reopen it.
 - Deletion is a separate confirmed action.
 - Notes are global across checkpoints, not per-page. Linking does not auto-include a note in a recap.
+- Notes can live in named folders (or stay unfiled); deleting a folder keeps its notes. Ticking a folder includes every note currently in it.
 - Dictation via the editor's Dictate button uses built-in browser speech recognition and inserts at the cursor; dictated text autosaves like typed text.
 - Notes may link to checkpoints. Deleting a checkpoint must not delete linked notes.
 

@@ -11,7 +11,7 @@ Help you resume unfinished work after an interruption without writing a handoff 
 - Generates a Muse recap with grounded observations, a suggested next action, and labeled uncertainty.
 - Keeps tabs for Resume, Notes, History, plus a small Wiki popup with the quality table.
 - History has text search, quality and summary filters, newest/oldest/title sort, per-row **Trash** with inline `Delete` / `Keep`, and bulk **Trash selected** with an inline count confirm. No native `confirm()` dialogs. Deleting a checkpoint keeps linked notes.
-- Notes are global, not per-page. `linkedCheckpointId` is optional metadata; linking does not auto-include a note. Tick notes under **Notes to include** to send them.
+- Notes are global, not per-page. `linkedCheckpointId` is optional metadata; linking does not auto-include a note. Tick notes under **Notes to include** to send them, or tick a folder to include all its notes.
 - Missing or partial code offers a paste-code fallback. Pasted code is saved as a linked `codeOverride` note and replaces captured code for the next recap only; the checkpoint stays immutable.
 - Summary states are `idle`, `pending`, `complete`, and `failed`. Failed recaps show the error, recap warnings, retry, and a 429 countdown when the backend sends `Retry-After`. Empty captures get an honest recap saying you didn't add anything to recap, plus what to add next.
 - Notes support mic dictation with the Dictate button in the editor toolbar, using Chrome's free built-in speech recognition. No API key needed. Spoken words are inserted at the cursor and autosave like typed text.
@@ -59,7 +59,7 @@ GOOGLE_CLIENT_SECRET="your-google-client-secret"
 ALLOWED_EXTENSION_ORIGINS="chrome-extension://your-extension-id"
 ```
 
-Set up a Google OAuth Web application client using [the Google sign-in guide](docs/google-sign-in.md). Only verified `@gmail.com` accounts can use AI. Keep `.dev.vars` private. The backend expects Bearer [REDACTED] from the direct Muse API and appends `/chat/completions` to AI_BASE_URL.
+Set up a Google OAuth Web application client using [the Google sign-in guide](docs/google-sign-in.md). Only verified `@gmail.com` accounts can use AI. Keep `.dev.vars` private. The backend sends Bearer [REDACTED] to the direct Muse API and appends `/chat/completions` to AI_BASE_URL.
 
 The nonsecret settings are in `backend/worker/wrangler.jsonc`:
 

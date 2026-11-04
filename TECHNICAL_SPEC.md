@@ -13,7 +13,7 @@ Product requirements: [SPEC.md](SPEC.md). Target: an unpacked Chrome extension d
 | Validation | Zod at extension and backend boundaries |
 | Persistence | chrome.storage.local; no account or remote database |
 | Backend | Cloudflare Worker with fetch for inference |
-| AI | Muse through one verified provider; Baseten is the initial integration target |
+| AI | Muse through one verified provider; direct Muse API (muse-spark-1.3) |
 | Testing | Vitest for state/adapters and Worker API; manual Chrome integration checklist |
 | Distribution | Load unpacked from extension/dist for the hackathon |
 
@@ -144,7 +144,8 @@ meta                    schema version and nonsecret preferences
 workspace               open note IDs, active note ID, selected checkpoint
 checkpoint:<uuid>       immutable captured content
 summary:<checkpointId>  current job status and last valid result
-note:<uuid>             editable note
+note:<uuid>             editable note (optional folderId)
+folder:<uuid>           named note folder
 event:<uuid>            activity metadata
 ```
 
