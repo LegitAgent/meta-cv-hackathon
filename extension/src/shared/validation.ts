@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LIMITS } from "./contracts";
+import { BACKEND_URL } from "./config";
 
 // Zod validation at every extension boundary: worker messages,
 // capture results, and backend responses.
@@ -36,7 +37,15 @@ export const noteSchema = z.object({
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   linkedCheckpointId: z.string().nullable(),
+  folderId: z.string().min(1).max(200).nullable().optional(),
   kind: z.literal("codeOverride").optional(),
+});
+
+export const folderSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(100),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
 });
 
 export const observedFactSchema = z.object({
@@ -71,7 +80,7 @@ export const workspaceSchema = z.object({
   selectedCheckpointId: z.string().nullable(),
   aiEnabled: z.boolean(),
   autoSummarize: z.boolean(),
-  backendUrl: z.string().max(200),
+  backendUrl: z.string().max(200).optional().default(BACKEND_URL),
 });
 
 export const workerCommandSchema = z.discriminatedUnion("type", [
@@ -91,6 +100,10 @@ export const workerCommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("NOTE_CLOSE"), id: z.string().min(1) }),
   z.object({ type: z.literal("NOTE_DELETE"), id: z.string().min(1) }),
+  z.object({ type: z.literal("NOTE_MOVE"), id: z.string().min(1), folderId: z.string().min(1).max(200).nullable() }),
+  z.object({ type: z.literal("FOLDER_CREATE"), name: z.string().min(1).max(100) }),
+  z.object({ type: z.literal("FOLDER_RENAME"), id: z.string().min(1), name: z.string().min(1).max(100) }),
+  z.object({ type: z.literal("FOLDER_DELETE"), id: z.string().min(1) }),
   z.object({
     type: z.literal("WORKSPACE_UPDATE"),
     fields: z

@@ -52,8 +52,13 @@ export function cleanUrl(raw: string): string {
 export function taskKeyForUrl(url: string): string {
   try {
     const u = new URL(url);
-    return `${u.hostname}${u.pathname}`;
+    return normTaskKey(`${u.hostname}${u.pathname}`);
   } catch {
     return url.slice(0, 200);
   }
+}
+
+/** Canonicalize a task key so a trailing slash cannot fork one page into two. */
+export function normTaskKey(key: string): string {
+  return key.length > 1 ? key.replace(/\/$/, "") : key;
 }

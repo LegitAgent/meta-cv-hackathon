@@ -33,7 +33,7 @@ const ARTICLES = [
     title: "History and account",
     body: [
       "History lists every checkpoint with its capture quality. Select one to resume it; a failed recap shows Retry, and Delete removes a single checkpoint while linked notes are kept. Tick rows to delete several at once, and Export JSON downloads checkpoints, notes, and history for backup. Everything lives on this device.",
-      "Sign in with Google unlocks recaps; your short-lived token stays in Chrome session storage and is never stored with your notes. Switch Google account changes who you sign in as, and Sign out turns AI features off while notes and captures keep working.",
+      "Sign in with Google unlocks recaps; your short-lived token stays in Chrome session storage and is never stored with your notes. Switch Google account changes who you sign in as. Sign out locks the panel behind the sign-in screen; your saved notes and checkpoints stay on this device and reappear when you sign back in.",
     ],
   },
 ];

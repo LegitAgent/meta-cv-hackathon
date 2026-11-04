@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import type { Note } from "../../shared/contracts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Note, NoteFolder } from "../../shared/contracts";
 import { renderPreview, toggleBullets, wrapInline } from "./noteFormat";
 
 export type SaveState = "saved" | "saving" | "error" | "conflict";
 
 export function NoteTabs({
   notes,
+  folders,
   openNoteIds,
   activeNoteId,
   onSelect,
@@ -13,6 +14,10 @@ export function NoteTabs({
   onClose,
   onDelete,
   onRename,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onMoveNote,
   draft,
   onDraftChange,
   saveState,
@@ -20,6 +25,7 @@ export function NoteTabs({
   onResolveConflict,
 }: {
   notes: Note[];
+  folders: NoteFolder[];
   openNoteIds: string[];
   activeNoteId: string | null;
   onSelect: (id: string) => void;
@@ -27,6 +33,10 @@ export function NoteTabs({
   onClose: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onCreateFolder: (name: string) => void;
+  onRenameFolder: (id: string, name: string) => void;
+  onDeleteFolder: (id: string) => void;
+  onMoveNote: (id: string, folderId: string | null) => void;
   draft: { title: string; body: string };
   onDraftChange: (d: { title: string; body: string }) => void;
   saveState: SaveState;
@@ -56,10 +66,9 @@ export function NoteTabs({
                     setEditingTab(null);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      onRename(id, editTitle || n.title);
-                      setEditingTab(null);
-                    }
+                    // Let blur do the single commit; calling onRename here too
+                    // fires it twice (Enter, then unmount blur).
+                    if (e.key === "Enter") e.currentTarget.blur();
                   }}
                 />
               ) : (
@@ -96,10 +105,12 @@ export function NoteTabs({
       {active ? (
         <NoteEditor
           note={active}
+          folders={folders}
           draft={draft}
           onDraftChange={onDraftChange}
           saveState={saveState}
           onDelete={onDelete}
+          onMoveNote={onMoveNote}
         />
       ) : (
         <div className="empty">No note open. Create one, or reopen a saved note below.</div>
@@ -115,23 +126,34 @@ export function NoteTabs({
         </div>
       )}
 
-      <SavedNotes notes={notes} openNoteIds={openNoteIds} onSelect={onSelect} onDelete={onDelete} />
+      <FoldersCard
+        folders={folders}
+        notes={notes}
+        onCreateFolder={onCreateFolder}
+        onRenameFolder={onRenameFolder}
+        onDeleteFolder={onDeleteFolder}
+      />
+      <SavedNotes notes={notes} folders={folders} openNoteIds={openNoteIds} onSelect={onSelect} onDelete={onDelete} onMoveNote={onMoveNote} />
     </section>
   );
 }
 
 function NoteEditor({
   note,
+  folders,
   draft,
   onDraftChange,
   saveState,
   onDelete,
+  onMoveNote,
 }: {
   note: Note;
+  folders: NoteFolder[];
   draft: { title: string; body: string };
   onDraftChange: (d: { title: string; body: string }) => void;
   saveState: SaveState;
   onDelete: (id: string) => void;
+  onMoveNote: (id: string, folderId: string | null) => void;
 }) {
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   const [preview, setPreview] = useState(false);
@@ -277,6 +299,21 @@ function NoteEditor({
         onChange={(e) => onDraftChange({ title: e.target.value, body: draft.body })}
         aria-label="Note title"
       />
+      <div className="row">
+        <label className="history-select">
+          Folder{" "}
+          <select
+            value={note.folderId ?? ""}
+            onChange={(e) => onMoveNote(note.id, e.target.value === "" ? null : e.target.value)}
+            aria-label="Note folder"
+          >
+            <option value="">Unfiled</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
       <div className="row format-bar" role="toolbar" aria-label="Text formatting">
         <button className="link" title="Bold" aria-label="Bold" onClick={() => applyFormat((body, sel) => wrapInline(body, sel, "**"))}><strong>B</strong></button>
         <button className="link" title="Italic" aria-label="Italic" onClick={() => applyFormat((body, sel) => wrapInline(body, sel, "*"))}><em>I</em></button>
@@ -342,23 +379,132 @@ function NoteEditor({
   );
 }
 
+export function FoldersCard({
+  folders,
+  notes,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+}: {
+  folders: NoteFolder[];
+  notes: Note[];
+  onCreateFolder: (name: string) => void;
+  onRenameFolder: (id: string, name: string) => void;
+  onDeleteFolder: (id: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const counts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const n of notes) {
+      if (n.folderId != null) map.set(n.folderId, (map.get(n.folderId) ?? 0) + 1);
+    }
+    return map;
+  }, [notes]);
+  return (
+    <div className="saved-notes">
+      <h4>Folders</h4>
+      <div className="row">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="New folder name"
+          aria-label="New folder name"
+          maxLength={100}
+        />
+        <button
+          disabled={!name.trim()}
+          onClick={() => {
+            onCreateFolder(name.trim());
+            setName("");
+          }}
+        >
+          + Folder
+        </button>
+      </div>
+      {folders.length > 0 && (
+        <ul>
+          {folders.map((f) => {
+            const count = counts.get(f.id) ?? 0;
+            return (
+              <li key={f.id}>
+                {editingId === f.id ? (
+                  <input
+                    value={editName}
+                    autoFocus
+                    maxLength={100}
+                    aria-label="Folder name"
+                    onChange={(e) => setEditName(e.target.value)}
+                    onBlur={() => {
+                      onRenameFolder(f.id, editName.trim() || f.name);
+                      setEditingId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                  />
+                ) : (
+                  <span title="Double-click to rename" onDoubleClick={() => { setEditingId(f.id); setEditName(f.name); }}>
+                    {f.name}
+                  </span>
+                )}
+                <span className="meta"> · {count} note{count === 1 ? "" : "s"}</span>
+                {confirmId === f.id ? (
+                  <span className="history-confirm" role="alert">
+                    <span>Delete “{f.name}”? Notes move to Unfiled.</span>
+                    <span className="row">
+                      <button
+                        className="danger"
+                        onClick={() => {
+                          onDeleteFolder(f.id);
+                          setConfirmId(null);
+                        }}
+                      >
+                        Delete
+                      </button>
+                      <button onClick={() => setConfirmId(null)}>Keep</button>
+                    </span>
+                  </span>
+                ) : (
+                  <button className="link danger" onClick={() => setConfirmId(f.id)}>
+                    Delete
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function SavedNotes({
   notes,
+  folders,
   openNoteIds,
   onSelect,
   onDelete,
+  onMoveNote,
 }: {
   notes: Note[];
+  folders: NoteFolder[];
   openNoteIds: string[];
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onMoveNote: (id: string, folderId: string | null) => void;
 }) {
+  const byFolderId = new Map(folders.map((f) => [f.id, f.name]));
   const closed = notes.filter((n) => !openNoteIds.includes(n.id));
   const [q, setQ] = useState("");
+  const [folder, setFolder] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [sort, setSort] = useState<"updated" | "created" | "title">("updated");
   const filtered = closed
     .filter((n) => n.title.toLowerCase().includes(q.toLowerCase()))
+    .filter((n) => folder === "" || (folder === "none" ? n.folderId == null : n.folderId === folder))
     .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : sort === "created" ? (a.createdAt < b.createdAt ? 1 : -1) : (a.updatedAt < b.updatedAt ? 1 : -1));
   useEffect(() => {
     setQ("");
@@ -369,18 +515,39 @@ export function SavedNotes({
       <h4>Saved notes</h4>
       <div className="row">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter saved notes" aria-label="Filter saved notes" />
+        <select value={folder} onChange={(e) => setFolder(e.target.value)} aria-label="Filter saved notes by folder">
+          <option value="">All folders</option>
+          <option value="none">Unfiled</option>
+          {folders.map((f) => (
+            <option key={f.id} value={f.id}>{f.name}</option>
+          ))}
+        </select>
         <select value={sort} onChange={(e) => setSort(e.target.value as "updated" | "created" | "title")} aria-label="Sort saved notes">
           <option value="updated">Last updated</option>
           <option value="created">Newest first</option>
           <option value="title">Title A–Z</option>
         </select>
       </div>
+      {closed.length > 0 && filtered.length === 0 && (
+        <div className="empty">No saved notes match this filter.</div>
+      )}
       <ul>
         {filtered.map((n) => (
           <li key={n.id}>
             <button className="link" onClick={() => onSelect(n.id)}>
               {n.title}
             </button>
+            <span className="meta"> · {n.folderId != null ? (byFolderId.get(n.folderId) ?? "Unfiled") : "Unfiled"}</span>
+            <select
+              value={n.folderId ?? ""}
+              onChange={(e) => onMoveNote(n.id, e.target.value === "" ? null : e.target.value)}
+              aria-label={`Move ${n.title} to folder`}
+            >
+              <option value="">Unfiled</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
             {confirmId === n.id ? (
               <span className="history-confirm" role="alert">
                 <span>Delete “{n.title}”?</span>

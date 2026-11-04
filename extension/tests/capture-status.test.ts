@@ -19,6 +19,7 @@ describe("autosave merge", () => {
     createdAt: "t",
     updatedAt: "t",
     linkedCheckpointId: null,
+    folderId: null,
   };
 
   it("keeps newer typing on success while adopting the new revision", () => {

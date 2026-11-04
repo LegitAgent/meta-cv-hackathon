@@ -6,6 +6,7 @@ import { SignInPage } from "./components/SignInPage";
 import { signIn, useCredential } from "./auth";
 import { BACKEND_URL } from "../shared/config";
 import {
+  expandNoteSelection,
   mergeSavedNote,
   resolveAdoptedDraft,
   sendCommand,
@@ -34,8 +35,11 @@ export default function App() {
   const [busySummary, setBusySummary] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [includeNoteIds, setIncludeNoteIds] = useState<string[]>([]);
+  const [includeFolderIds, setIncludeFolderIds] = useState<string[]>([]);
   const [noteFilter, setNoteFilter] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const autoRanFor = useRef<string | null>(null);
 
   // Panel owns the live note draft; storage is only updated on debounced save.
@@ -92,9 +96,9 @@ export default function App() {
   useEffect(() => {
     if (!snap) return;
     if (credential && !snap.workspace.aiEnabled) {
-      void sendCommand({ type: "WORKSPACE_UPDATE", fields: { aiEnabled: true } }).then(() => refresh());
+      void sendCommand({ type: "WORKSPACE_UPDATE", fields: { aiEnabled: true } }).then(() => refresh()).catch(() => setActionError("Could not enable AI features. Reload the panel and try again."));
     } else if (!credential && (snap.workspace.aiEnabled || snap.workspace.autoSummarize)) {
-      void sendCommand({ type: "WORKSPACE_UPDATE", fields: { aiEnabled: false, autoSummarize: false } }).then(() => refresh());
+      void sendCommand({ type: "WORKSPACE_UPDATE", fields: { aiEnabled: false, autoSummarize: false } }).then(() => refresh()).catch(() => setActionError("Could not update workspace settings. Reload the panel and try again."));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [credential, snap?.workspace.aiEnabled, snap?.workspace.autoSummarize]);
@@ -197,8 +201,17 @@ export default function App() {
           .get([`note:${key}`])
           .then((g) => (g as Record<string, Note>)[`note:${key}`])
           .catch(() => null);
-        setConflictNote(current ?? null);
-        setSaveState("conflict");
+        if (!current) {
+          // The note is gone: release the lock instead of blocking all saves
+          // behind a banner that can never render.
+          conflictedNoteId.current = null;
+          setConflictNote(null);
+          setConflictText(null);
+          setSaveState("error");
+        } else {
+          setConflictNote(current);
+          setSaveState("conflict");
+        }
       } else {
         // Transient failure: requeue the exact text for the same note.
         if (!outbox.current.has(key)) outbox.current.set(key, text);
@@ -295,6 +308,10 @@ export default function App() {
     return snap.notes.filter((n) => n.title.toLowerCase().includes(q));
   }, [snap, noteFilter]);
   const visibleIncludeIds = visibleIncludeNotes.map((n) => n.id);
+  const effectiveIncludeIds = useMemo(
+    () => expandNoteSelection(snap?.notes ?? [], includeNoteIds, includeFolderIds),
+    [snap, includeNoteIds, includeFolderIds],
+  );
 
   const selectedCheckpoint: Checkpoint | null = useMemo(() => {
     if (!snap) return null;
@@ -351,23 +368,31 @@ export default function App() {
     try {
       const trimmed = stuckPoint.trim();
       await sendCommand({ type: "CAPTURE", ...(trimmed ? { stuckPoint: trimmed } : {}) });
+      await refresh();
+      return true;
     } catch {
       // The worker records the outcome; the panel shows it.
+      await refresh();
+      return false;
     } finally {
       // Always re-enable Save: a failed save on a restricted tab must never
       // wedge the button on "Saving…" and force a reload to save other tabs.
       setCapturing(false);
     }
-    await refresh();
   }, [refresh]);
 
   const runSummary = useCallback(
     async (checkpointId: string) => {
       if (busySummary || !aiEnabled || !signedIn || !credential) return;
-      // Drop ids for notes deleted elsewhere; the worker would only warn.
+      // Drop ids for notes and folders deleted elsewhere; the worker would only warn.
       const liveIds = new Set((snap?.notes ?? []).map((n) => n.id));
-      const noteIds = includeNoteIds.filter((id) => liveIds.has(id));
-      if (noteIds.length !== includeNoteIds.length) setIncludeNoteIds(noteIds);
+      const liveFolderIds = new Set((snap?.folders ?? []).map((f) => f.id));
+      const keptNoteIds = includeNoteIds.filter((id) => liveIds.has(id));
+      if (keptNoteIds.length !== includeNoteIds.length) setIncludeNoteIds(keptNoteIds);
+      const keptFolderIds = includeFolderIds.filter((id) => liveFolderIds.has(id));
+      if (keptFolderIds.length !== includeFolderIds.length) setIncludeFolderIds(keptFolderIds);
+      // Tick a folder to include every note currently in it.
+      const noteIds = expandNoteSelection(snap?.notes ?? [], keptNoteIds, keptFolderIds);
       setBusySummary(true);
       try {
         const { job, payload } = await sendCommand<{
@@ -395,7 +420,7 @@ export default function App() {
         await refresh();
       }
     },
-    [busySummary, aiEnabled, signedIn, credential, includeNoteIds, snap?.notes, refresh],
+    [busySummary, aiEnabled, signedIn, credential, includeNoteIds, includeFolderIds, snap?.notes, snap?.folders, refresh],
   );
 
   const setAiEnabled = useCallback(
@@ -463,6 +488,21 @@ export default function App() {
     void runSummary(newest.id);
   }, [snap?.checkpoints, snap?.summaries, aiEnabled, autoSummarize, busySummary, signedIn, runSummary]);
 
+  // A pasted-code error belongs to the checkpoint it was raised on.
+  useEffect(() => {
+    setPasteError(null);
+  }, [snap?.workspace.selectedCheckpointId]);
+
+  // Drop resume selections for notes that no longer exist so the count
+  // never over-reports between a delete and the next recap.
+  useEffect(() => {
+    setIncludeNoteIds((ids) => {
+      if (!snap) return ids;
+      const next = ids.filter((id) => snap.notes.some((n) => n.id === id));
+      return next.length === ids.length ? ids : next;
+    });
+  }, [snap?.notes]);
+
   const exportJson = useCallback(async () => {
     try {
       const all = await chrome.storage.local.get(null);
@@ -473,7 +513,9 @@ export default function App() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `backtrack-export-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
       URL.revokeObjectURL(url);
       setExportError(null);
     } catch (e) {
@@ -533,8 +575,14 @@ export default function App() {
             busy={busySummary}
             autoSummarize={autoSummarize}
             onAutoSummarize={(v) => void setAutoSummarize(v)}
+            aiEnabled={aiEnabled}
             onSummarize={() => selectedCheckpoint && void runSummary(selectedCheckpoint.id)}
-            onCopyCode={() => selectedCheckpoint?.code && void navigator.clipboard.writeText(selectedCheckpoint.code).catch(() => undefined)}
+            onCopyCode={() => {
+              if (!selectedCheckpoint?.code) return;
+              setCopyError(null);
+              void navigator.clipboard.writeText(selectedCheckpoint.code).catch(() => setCopyError("Copy failed. Select the code manually."));
+            }}
+            copyError={copyError}
             onOpenSource={() => {
               if (selectedCheckpoint) void openCheckpoint(selectedCheckpoint);
             }}
@@ -545,7 +593,27 @@ export default function App() {
           <SummaryCard job={selectedJob} />
           <section className="card notes-include">
             <h3>Notes to include</h3>
-            <p className="hint">Linking a note does not include it automatically. Select notes explicitly.</p>
+            <p className="hint">Linking a note does not include it automatically. Select notes explicitly, or tick a folder to include all its notes.</p>
+            {snap.folders.length > 0 && (
+              <div className="row" role="group" aria-label="Include folders">
+                {snap.folders.map((f) => {
+                  const count = snap.notes.filter((n) => n.folderId === f.id).length;
+                  return (
+                    <label key={f.id} className="check" title={count === 0 ? "No notes in this folder" : `Include all ${count} notes in ${f.name}`}>
+                      <input
+                        type="checkbox"
+                        checked={includeFolderIds.includes(f.id)}
+                        disabled={count === 0}
+                        onChange={(e) =>
+                          setIncludeFolderIds((ids) => (e.target.checked ? [...ids, f.id] : ids.filter((x) => x !== f.id)))
+                        }
+                      />
+                      {f.name} ({count})
+                    </label>
+                  );
+                })}
+              </div>
+            )}
             {snap.notes.length === 0 && (
               <div className="empty">
                 No notes yet.{" "}
@@ -582,7 +650,7 @@ export default function App() {
                   <button onClick={() => void createNoteForRecap()} title="Create a note and add it to this recap">
                     + Note
                   </button>
-                  <span className="meta">{includeNoteIds.length} of {snap.notes.length} selected</span>
+                  <span className="meta">{effectiveIncludeIds.length} of {snap.notes.length} selected</span>
                 </div>
               </>
             )}
@@ -616,6 +684,7 @@ export default function App() {
       {view === "notes" && (
         <NoteTabs
           notes={snap.notes}
+          folders={snap.folders}
           openNoteIds={snap.workspace.openNoteIds}
           activeNoteId={snap.workspace.activeNoteId}
           onSelect={(id) => void selectNote(id)}
@@ -635,6 +704,23 @@ export default function App() {
             dropPendingNote(id);
             setIncludeNoteIds((ids) => ids.filter((x) => x !== id));
             await sendCommand({ type: "NOTE_DELETE", id });
+            await refresh();
+          }}
+          onCreateFolder={async (name) => {
+            await sendCommand({ type: "FOLDER_CREATE", name });
+            await refresh();
+          }}
+          onRenameFolder={async (id, name) => {
+            await sendCommand({ type: "FOLDER_RENAME", id, name });
+            await refresh();
+          }}
+          onDeleteFolder={async (id) => {
+            setIncludeFolderIds((ids) => ids.filter((x) => x !== id));
+            await sendCommand({ type: "FOLDER_DELETE", id });
+            await refresh();
+          }}
+          onMoveNote={async (id, folderId) => {
+            await sendCommand({ type: "NOTE_MOVE", id, folderId });
             await refresh();
           }}
           onRename={async (id, title) => {
@@ -690,16 +776,28 @@ export default function App() {
           summaries={snap.summaries}
           events={snap.events}
           selectedId={snap.workspace.selectedCheckpointId}
-          onSelect={(id) => void sendCommand({ type: "WORKSPACE_UPDATE", fields: { selectedCheckpointId: id } }).then(() => refresh())}
+          onSelect={(id) => {
+            setActionError(null);
+            void sendCommand({ type: "WORKSPACE_UPDATE", fields: { selectedCheckpointId: id } })
+              .then(() => refresh())
+              .catch(() => setActionError("Could not select that checkpoint. Reload the panel and try again."));
+          }}
           onDelete={async (id) => {
             await sendCommand({ type: "CHECKPOINT_DELETE", id });
             await refresh();
           }}
           onDeleteMany={async (ids) => {
+            setActionError(null);
+            let failed = 0;
             for (const id of ids) {
-              await sendCommand({ type: "CHECKPOINT_DELETE", id });
+              try {
+                await sendCommand({ type: "CHECKPOINT_DELETE", id });
+              } catch {
+                failed += 1;
+              }
             }
             await refresh();
+            if (failed > 0) setActionError(`Deleted ${ids.length - failed} of ${ids.length} checkpoints. Reload the panel and retry the rest.`);
           }}
           onRetry={(id) => void runSummary(id)}
           aiEnabled={aiEnabled}
@@ -716,6 +814,7 @@ export default function App() {
         <span className="meta">Notes saved on this device · v{chrome.runtime.getManifest?.().version ?? "dev"}</span>
       </footer>
       {exportError && <div className="error" role="alert">{exportError}</div>}
+      {actionError && <div className="error" role="alert">{actionError}</div>}
     </div>
   );
 }

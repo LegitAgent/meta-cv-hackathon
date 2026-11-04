@@ -7,13 +7,14 @@ import type { Note } from "../src/shared/contracts";
 afterEach(() => cleanup());
 
 function note(): Note {
-  return { id: "a", revision: 0, title: "a", body: "Hello", createdAt: "2026-01-01", updatedAt: "2026-01-01", linkedCheckpointId: null };
+  return { id: "a", revision: 0, title: "a", body: "Hello", createdAt: "2026-01-01", updatedAt: "2026-01-01", linkedCheckpointId: null, folderId: null };
 }
 
 function renderEditor(onDraftChange: (d: { title: string; body: string }) => void) {
   render(
     <NoteTabs
       notes={[note()]}
+      folders={[]}
       openNoteIds={["a"]}
       activeNoteId="a"
       onSelect={() => undefined}
@@ -21,6 +22,10 @@ function renderEditor(onDraftChange: (d: { title: string; body: string }) => voi
       onClose={() => undefined}
       onDelete={() => undefined}
       onRename={() => undefined}
+      onCreateFolder={() => undefined}
+      onRenameFolder={() => undefined}
+      onDeleteFolder={() => undefined}
+      onMoveNote={() => undefined}
       draft={{ title: "a", body: "Hello" }}
       onDraftChange={onDraftChange}
       saveState="saved"

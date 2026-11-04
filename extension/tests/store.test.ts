@@ -36,6 +36,7 @@ describe("note draft boundaries", () => {
         createdAt: "",
         updatedAt: "",
         linkedCheckpointId: null,
+        folderId: null,
       },
       { title: "typed", body: "typed-body" },
     );

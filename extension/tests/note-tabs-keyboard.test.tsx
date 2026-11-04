@@ -7,7 +7,17 @@ import type { Note } from "../src/shared/contracts";
 afterEach(() => cleanup());
 
 function note(): Note {
-  return { id: "a", revision: 0, title: "Shopping", body: "Milk", createdAt: "2026-01-01", updatedAt: "2026-01-01", linkedCheckpointId: null };
+  return { id: "a", revision: 0, title: "Shopping", body: "Milk", createdAt: "2026-01-01", updatedAt: "2026-01-01", linkedCheckpointId: null, folderId: null };
+}
+
+function folderProps() {
+  return {
+    folders: [],
+    onCreateFolder: () => undefined,
+    onRenameFolder: () => undefined,
+    onDeleteFolder: () => undefined,
+    onMoveNote: () => undefined,
+  };
 }
 
 it("selects with Enter and opens rename with F2 from the keyboard", () => {
@@ -15,6 +25,7 @@ it("selects with Enter and opens rename with F2 from the keyboard", () => {
   render(
     <NoteTabs
       notes={[note()]}
+      {...folderProps()}
       openNoteIds={["a"]}
       activeNoteId="a"
       onSelect={onSelect}

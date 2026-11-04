@@ -131,7 +131,7 @@ export function HistoryView({
             placeholder="Filter by title or URL"
             aria-label="Filter checkpoints"
           />
-          <div className="row">
+          <div className="history-filters">
             <label className="history-select">
               Quality{" "}
               <select value={quality} onChange={(e) => setQuality(e.target.value as typeof quality)} aria-label="Filter by quality">

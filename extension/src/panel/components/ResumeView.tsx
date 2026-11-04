@@ -31,8 +31,8 @@ export function QualityBadge({ checkpoint }: { checkpoint: Checkpoint }) {
       <span className="quality-code">{q.code}</span>
       {q.missingFields.length > 0 && <span>Missing: {q.missingFields.join(", ")}</span>}
       {q.truncatedFields.length > 0 && <span>Truncated: {q.truncatedFields.join(", ")}</span>}
-      {q.warnings.map((w) => (
-        <span key={w} className="warning">
+      {q.warnings.map((w, i) => (
+        <span key={i} className="warning">
           {w}
         </span>
       ))}
@@ -64,11 +64,13 @@ export function ResumeView({
   onAutoSummarize,
   onPasteCode,
   pasteError,
+  aiEnabled = true,
+  copyError = null,
 }: {
   checkpoint: Checkpoint | null;
   job: SummaryJob | null;
   related: Checkpoint[];
-  onCapture: (stuckPoint: string) => void;
+  onCapture: (stuckPoint: string) => void | Promise<boolean>;
   capturing: boolean;
   onSummarize: () => void;
   onCopyCode: () => void;
@@ -79,12 +81,17 @@ export function ResumeView({
   onAutoSummarize: (v: boolean) => void;
   onPasteCode: (code: string) => Promise<boolean>;
   pasteError: string | null;
+  aiEnabled?: boolean;
+  copyError?: string | null;
 }) {
   const [paste, setPaste] = useState("");
   const [stuck, setStuck] = useState("");
+  const recapDisabled = busy || aiEnabled === false;
   const save = () => {
-    onCapture(stuck);
-    setStuck("");
+    // Keep the typed stuck point when the save fails so nothing is lost.
+    void Promise.resolve(onCapture(stuck)).then((ok) => {
+      if (ok !== false) setStuck("");
+    });
   };
   if (!checkpoint)
     return (
@@ -136,6 +143,7 @@ export function ResumeView({
       <div className="row">
         <button onClick={onOpenSource}>Reopen source</button>
         {checkpoint.code && <button onClick={onCopyCode}>Copy code</button>}
+        {copyError && <div className="error" role="alert">{copyError}</div>}
       </div>
       {related.length > 0 && (
         <div className="resume-stack">
@@ -197,15 +205,18 @@ export function ResumeView({
           Summarize new captures automatically.
         </label>
       </div>
+      {aiEnabled === false && (
+        <p className="hint">AI recaps are disabled for this session. Sign out and back in to re-enable them.</p>
+      )}
       <div className="row">
-        <button className="primary" onClick={onSummarize} disabled={busy}>
+        <button className="primary" onClick={onSummarize} disabled={recapDisabled}>
           {busy ? "Summarizing…" : job?.status === "pending" ? "Retry summary" : "Generate recap"}
         </button>
       </div>
       {job && job.warnings.length > 0 && (
         <div className="warning">
           {job.warnings.map((w, i) => (
-            <div key={w}>{w}</div>
+            <div key={i}>{w}</div>
           ))}
         </div>
       )}
@@ -258,9 +269,11 @@ export function SummaryCard({ job }: { job: SummaryJob | null }) {
     <section className="card summary">
       <h3>Recap</h3>
       <p>{s.recap}</p>
-      <button className="link" onClick={() => setShowFacts((v) => !v)}>
-        {showFacts ? "Hide observed facts" : `Show observed facts (${s.observedFacts.length})`}
-      </button>
+      {s.observedFacts.length > 0 && (
+        <button className="link" onClick={() => setShowFacts((v) => !v)}>
+          {showFacts ? "Hide observed facts" : `Show observed facts (${s.observedFacts.length})`}
+        </button>
+      )}
       {showFacts && (
         <ul>
           {s.observedFacts.map((f, i) => (
@@ -283,7 +296,7 @@ export function SummaryCard({ job }: { job: SummaryJob | null }) {
           <strong>Uncertainties:</strong>
           <ul>
             {s.uncertainties.map((u, i) => (
-              <li key={u}>{u}</li>
+              <li key={i}>{u}</li>
             ))}
           </ul>
         </div>

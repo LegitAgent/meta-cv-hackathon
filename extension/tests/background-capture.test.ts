@@ -237,3 +237,65 @@ describe("panel-initiated capture", () => {
     expect(executeScript).not.toHaveBeenCalled();
   });
 });
+
+describe("worker command branches", () => {
+  type Ok<T> = { ok: true; data: T };
+  type Err = { ok: false; error: { code: string; message: string } };
+  const cmd = (message: Record<string, unknown>) => message as unknown as PanelMessage;
+
+  it("creates, updates, closes, and deletes notes", async () => {
+    const { records, send } = setup(undefined);
+    await import("../src/background");
+    const created = await send(cmd({ type: "NOTE_CREATE", title: "n" })) as unknown as Ok<{ note: { id: string; revision: number } }>;
+    expect(created.ok).toBe(true);
+    const id = created.data.note.id;
+    const updated = await send(cmd({ type: "NOTE_UPDATE", id, baseRevision: 0, title: "n2", body: "b" })) as unknown as Ok<{ note: { revision: number } }>;
+    expect(updated.ok).toBe(true);
+    expect(updated.data.note.revision).toBe(1);
+    const conflict = await send(cmd({ type: "NOTE_UPDATE", id, baseRevision: 0, title: "stale", body: "b" })) as unknown as Err;
+    expect(conflict.ok).toBe(false);
+    expect(conflict.error.code).toBe("REVISION_CONFLICT");
+    const missing = await send(cmd({ type: "NOTE_UPDATE", id: "ghost", baseRevision: 0, title: "x", body: "y" })) as unknown as Err;
+    expect(missing.error.code).toBe("NOT_FOUND");
+    const closed = await send(cmd({ type: "NOTE_CLOSE", id })) as unknown as Ok<{ workspace: { openNoteIds: string[] } }>;
+    expect(closed.ok).toBe(true);
+    expect(closed.data.workspace.openNoteIds).not.toContain(id);
+    const deleted = await send(cmd({ type: "NOTE_DELETE", id })) as unknown as Ok<{ deleted: boolean }>;
+    expect(deleted.data.deleted).toBe(true);
+    expect(records[`note:${id}`]).toBeUndefined();
+    const deletedAgain = await send(cmd({ type: "NOTE_DELETE", id })) as unknown as Err;
+    expect(deletedAgain.error.code).toBe("NOT_FOUND");
+  });
+
+  it("updates the workspace and guards summaries behind AI", async () => {
+    const { records, send } = setup(undefined);
+    await import("../src/background");
+    const cap = await send({ type: "CAPTURE" });
+    expect(cap.ok).toBe(true);
+    const id = (records["meta:lastCapture"] as { checkpointId: string }).checkpointId;
+    const disabled = await send(cmd({ type: "SUMMARY_BEGIN", checkpointId: id, noteIds: [] })) as unknown as Err;
+    expect(disabled.error.code).toBe("AI_DISABLED");
+    const ws = await send(cmd({ type: "WORKSPACE_UPDATE", fields: { aiEnabled: true } })) as unknown as Ok<{ workspace: { aiEnabled: boolean } }>;
+    expect(ws.data.workspace.aiEnabled).toBe(true);
+    const begun = await send(cmd({ type: "SUMMARY_BEGIN", checkpointId: id, noteIds: [] })) as unknown as Ok<{ job: { requestId: string }; payload: unknown }>;
+    expect(begun.ok).toBe(true);
+    expect(typeof begun.data.job.requestId).toBe("string");
+    const missing = await send(cmd({ type: "SUMMARY_BEGIN", checkpointId: "ghost", noteIds: [] })) as unknown as Err;
+    expect(missing.error.code).toBe("CHECKPOINT_NOT_FOUND");
+    const result = { recap: "r", observedFacts: [], possibleBlocker: null, nextAction: "n", uncertainties: [] };
+    const failed = await send(cmd({ type: "SUMMARY_FAIL", checkpointId: id, requestId: begun.data.job.requestId, error: { code: "E", message: "m" } })) as unknown as Ok<{ recorded: boolean }>;
+    expect(failed.data.recorded).toBe(true);
+    const done = await send(cmd({ type: "SUMMARY_COMPLETE", checkpointId: id, requestId: begun.data.job.requestId, result })) as unknown as Ok<{ committed: boolean }>;
+    expect(done.data.committed).toBe(true);
+    const stale = await send(cmd({ type: "SUMMARY_COMPLETE", checkpointId: id, requestId: "other", result })) as unknown as Err;
+    expect(stale.error.code).toBe("STALE_RESULT");
+    const deleted = await send(cmd({ type: "CHECKPOINT_DELETE", id })) as unknown as Ok<{ deleted: boolean }>;
+    expect(deleted.data.deleted).toBe(true);
+    const gone = await send(cmd({ type: "CHECKPOINT_DELETE", id })) as unknown as Err;
+    expect(gone.error.code).toBe("NOT_FOUND");
+    const resumed = await send(cmd({ type: "CHECKPOINT_RESUMED", id })) as unknown as Err;
+    expect(resumed.error.code).toBe("NOT_FOUND");
+    const invalid = await send(cmd({ type: "BOGUS" })) as unknown as Err;
+    expect(invalid.error.code).toBe("INVALID_COMMAND");
+  });
+});

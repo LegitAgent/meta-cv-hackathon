@@ -77,6 +77,20 @@ export async function reconcileOnStartup(area: AsyncStorageArea): Promise<Reconc
     autoSummarize: storedWs.autoSummarize === true,
   } });
 
+  // Notes pointing at deleted folders fall back to unfiled.
+  const folderIds = new Set(
+    Object.keys(all).filter((key) => key.startsWith("folder:")).map((key) => key.slice("folder:".length)),
+  );
+  const folderFixes: Record<string, unknown> = {};
+  for (const id of notes) {
+    const n = all[`note:${id}`] as Note | undefined;
+    if (n && n.folderId != null && !folderIds.has(n.folderId)) {
+      folderFixes[`note:${id}`] = { ...n, folderId: null };
+      report.removedWorkspaceRefs.push(`noteFolder:${id}`);
+    }
+  }
+  if (Object.keys(folderFixes).length > 0) await area.set(folderFixes);
+
   // Orphans: valid records not referenced by the workspace (surfaced, kept).
   for (const id of notes) {
     const n = all[`note:${id}`] as Note;

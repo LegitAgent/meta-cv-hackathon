@@ -1,6 +1,6 @@
 // Core Backtrack contracts. Storage keys (chrome.storage.local):
 // meta | workspace | checkpoint:<uuid> | summary:<checkpointId>
-// | note:<uuid> | event:<uuid>
+// | note:<uuid> | folder:<uuid> | event:<uuid>
 
 export type QualityCode = "complete" | "partial" | "unavailable";
 
@@ -38,7 +38,15 @@ export interface Note {
   createdAt: string;
   updatedAt: string;
   linkedCheckpointId: string | null;
+  folderId: string | null;
   kind?: "codeOverride";
+}
+
+export interface NoteFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface NoteSnapshot {
@@ -119,6 +127,10 @@ export type WorkerCommand =
   | { type: "NOTE_UPDATE"; id: string; baseRevision: number; title: string; body: string }
   | { type: "NOTE_CLOSE"; id: string }
   | { type: "NOTE_DELETE"; id: string }
+  | { type: "NOTE_MOVE"; id: string; folderId: string | null }
+  | { type: "FOLDER_CREATE"; name: string }
+  | { type: "FOLDER_RENAME"; id: string; name: string }
+  | { type: "FOLDER_DELETE"; id: string }
   | { type: "WORKSPACE_UPDATE"; fields: Partial<Workspace> }
   | { type: "SUMMARY_BEGIN"; checkpointId: string; noteIds: string[] }
   | { type: "SUMMARY_COMPLETE"; checkpointId: string; requestId: string; result: Summary }
@@ -155,7 +167,6 @@ export const LIMITS = {
   NOTES_TOTAL_MAX: 10000,
   SCREENSHOT_MAX: 120000,
   STUCK_POINT_MAX: 500,
-  // BODY_BYTES_MAX removed: the worker enforces the same cap as BODY_LIMIT.
 } as const;
 
 export function newId(): string {

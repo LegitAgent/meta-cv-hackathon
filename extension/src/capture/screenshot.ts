@@ -10,13 +10,16 @@ const ATTEMPTS = [
   { maxDim: 800, quality: 0.6 },
 ] as const;
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
+// FileReader does not exist in MV3 service workers; build the data URL from
+// the raw bytes instead so the downscale loop works where captures run.
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
 }
 
 /**

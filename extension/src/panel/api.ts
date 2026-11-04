@@ -56,7 +56,7 @@ export async function postSummary(
     return parsed.data;
   } catch (e) {
     if (e instanceof Error && (e.name === "AbortError" || /TIMEOUT|ABORTED/.test(e.message))) {
-      throw Object.assign(new Error("Summary request timed out after 45s. The checkpoint is saved; retry when ready."), {
+      throw Object.assign(new Error(`Summary request timed out after ${Math.round(timeoutMs / 1000)}s. The checkpoint is saved; retry when ready.`), {
         code: "TIMEOUT",
       });
     }

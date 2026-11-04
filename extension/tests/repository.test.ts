@@ -200,6 +200,39 @@ describe("repository", () => {
     expect("backendUrl" in ws).toBe(false);
   });
 
+  it("creates, renames, and deletes folders without touching notes", async () => {
+    const repo = new Repository(memArea());
+    const folder = await repo.createFolder("  Research  ");
+    expect(folder.name).toBe("Research");
+    const renamed = await repo.renameFolder(folder.id, "Reading");
+    expect(renamed?.name).toBe("Reading");
+    expect(await repo.renameFolder("missing", "x")).toBeNull();
+    const note = await repo.createNote("n");
+    expect((await repo.moveNote(note.id, folder.id)).ok).toBe(true);
+    expect((await repo.getNote(note.id))?.folderId).toBe(folder.id);
+    expect(await repo.deleteFolder(folder.id)).toBe(true);
+    expect((await repo.getNote(note.id))?.folderId).toBeNull();
+    expect(await repo.deleteFolder(folder.id)).toBe(false);
+  });
+
+  it("rejects moves to missing folders and missing notes without bumping revisions", async () => {
+    const repo = new Repository(memArea());
+    const note = await repo.createNote("n");
+    expect(await repo.moveNote(note.id, "ghost")).toEqual({ ok: false, code: "NO_SUCH_FOLDER" });
+    expect(await repo.moveNote("ghost", null)).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect((await repo.getNote(note.id))?.revision).toBe(0);
+  });
+
+  it("reconciliation unfiles notes whose folder is gone", async () => {
+    const area = memArea({
+      "note:a": { id: "a", revision: 0, title: "a", body: "b", createdAt: "t", updatedAt: "t", linkedCheckpointId: null, folderId: "gone" },
+      workspace: { openNoteIds: [], activeNoteId: null, selectedCheckpointId: null, aiEnabled: false, autoSummarize: false },
+    });
+    const report = await reconcileOnStartup(area);
+    expect(report.removedWorkspaceRefs).toContain("noteFolder:a");
+    expect(((await area.get(["note:a"]))["note:a"] as Note).folderId).toBeNull();
+  });
+
   it("reconciliation drops invalid workspace refs and interrupts stale jobs", async () => {
     const area = memArea({
       workspace: {

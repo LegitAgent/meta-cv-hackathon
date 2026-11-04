@@ -13,7 +13,7 @@ import {
   type Workspace,
 } from "./shared/contracts";
 import { buildSummaryPayload } from "./shared/payload";
-import { cleanUrl, taskKeyForUrl } from "./capture/types";
+import { cleanUrl, normTaskKey, taskKeyForUrl } from "./capture/types";
 import { workerCommandSchema } from "./shared/validation";
 import { Repository, type AsyncStorageArea } from "./storage/repository";
 import { ensureDefaults, reconcileOnStartup } from "./storage/migrations";
@@ -107,7 +107,10 @@ async function captureTab(tabId: number, tabUrl: string, stuckPoint: string | nu
   }
   if (initialUrl) {
     const blocked = unsupportedReason(initialUrl);
-    if (blocked) return fail("UNSUPPORTED_PAGE", blocked);
+    if (blocked) {
+      if (initialUrl.startsWith("file:")) return fail("UNSUPPORTED_PAGE", `${blocked} Enable "Allow access to file URLs" on Backtrack's card in chrome://extensions to capture local files.`);
+      return fail("UNSUPPORTED_PAGE", blocked);
+    }
   }
 
   // Generic extraction in the top frame.
@@ -146,7 +149,7 @@ async function captureTab(tabId: number, tabUrl: string, stuckPoint: string | nu
   const norm = (u: string) => {
     try {
       const p = new URL(u);
-      return `${p.hostname}${p.pathname}`;
+      return normTaskKey(`${p.hostname}${p.pathname}`);
     } catch {
       return u;
     }
@@ -267,8 +270,9 @@ async function captureTab(tabId: number, tabUrl: string, stuckPoint: string | nu
 /** Newest checkpoint id for a task, or null when nothing matches. */
 export function newestCheckpointIdForTask(checkpoints: Checkpoint[], taskKey: string): string | null {
   let best: Checkpoint | null = null;
+  const want = normTaskKey(taskKey);
   for (const c of checkpoints) {
-    if (c.taskKey !== taskKey) continue;
+    if (normTaskKey(c.taskKey) !== want) continue;
     if (!best || c.createdAt > best.createdAt) best = c;
   }
   return best?.id ?? null;
@@ -339,6 +343,22 @@ async function handleCommand(cmd: WorkerCommand): Promise<WorkerResponse> {
     case "NOTE_DELETE": {
       const deleted = await repo.deleteNote(cmd.id);
       return deleted ? ok({ deleted: true }) : fail("NOT_FOUND", "Note no longer exists.");
+    }
+    case "NOTE_MOVE": {
+      const r = await repo.moveNote(cmd.id, cmd.folderId);
+      if (r.ok) return ok({ note: r.note });
+      return fail(r.code === "NO_SUCH_FOLDER" ? "FOLDER_NOT_FOUND" : "NOT_FOUND", r.code === "NO_SUCH_FOLDER" ? "Folder no longer exists." : "Note no longer exists.");
+    }
+    case "FOLDER_CREATE": {
+      return ok({ folder: await repo.createFolder(cmd.name) });
+    }
+    case "FOLDER_RENAME": {
+      const folder = await repo.renameFolder(cmd.id, cmd.name);
+      return folder ? ok({ folder }) : fail("NOT_FOUND", "Folder no longer exists.");
+    }
+    case "FOLDER_DELETE": {
+      const deleted = await repo.deleteFolder(cmd.id);
+      return deleted ? ok({ deleted: true }) : fail("NOT_FOUND", "Folder no longer exists.");
     }
     case "WORKSPACE_UPDATE": {
       const ws = await repo.updateWorkspace(cmd.fields);

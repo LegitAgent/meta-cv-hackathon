@@ -7,7 +7,7 @@ import { HistoryView } from "../src/panel/components/HistoryView";
 import type { Checkpoint, Note, SummaryJob } from "../src/shared/contracts";
 
 function note(id: string, body = ""): Note {
-  return { id, revision: 0, title: id, body, createdAt: "2026-01-01", updatedAt: "2026-01-01", linkedCheckpointId: null };
+  return { id, revision: 0, title: id, body, createdAt: "2026-01-01", updatedAt: "2026-01-01", linkedCheckpointId: null, folderId: null };
 }
 
 function setup(opts: { signedIn?: boolean } = {}) {

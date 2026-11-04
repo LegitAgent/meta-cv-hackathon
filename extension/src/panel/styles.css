@@ -64,6 +64,7 @@ pre.code::-webkit-scrollbar,
 }
 
 .app {
+  container-type: inline-size;
   padding: 12px 12px 20px;
   display: flex;
   flex-direction: column;
@@ -509,7 +510,48 @@ ul.history li.selected::before {
   align-items: center;
 }
 
+ul.history li > * {
+  min-width: 0;
+}
+
+.history-top {
+  min-width: 0;
+}
+
+.history-top > input[type="checkbox"] {
+  flex: none;
+}
+
+.history-top > button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.history-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+  gap: 8px;
+}
+
+.history-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.history-select select {
+  flex: 1;
+  min-width: 0;
+}
+
 .history-confirm {
+  overflow-wrap: anywhere;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -762,7 +804,7 @@ details.paste-box {
 }
 
 /* Wider panels: roomier cards, two-column history rows. */
-@media (min-width: 480px) {
+@container (min-width: 480px) {
   .app {
     padding: 16px 16px 28px;
   }
@@ -773,6 +815,7 @@ details.paste-box {
 
   ul.history li {
     flex-direction: row;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: baseline;
     gap: 12px;

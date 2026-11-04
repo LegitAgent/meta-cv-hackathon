@@ -11,6 +11,7 @@ import {
   type Checkpoint,
   type Meta,
   type Note,
+  type NoteFolder,
   type Summary,
   type SummaryJob,
   type Workspace,
@@ -26,6 +27,7 @@ export interface AsyncStorageArea {
 export const keyCheckpoint = (id: string) => `checkpoint:${id}`;
 export const keySummary = (checkpointId: string) => `summary:${checkpointId}`;
 export const keyNote = (id: string) => `note:${id}`;
+export const keyFolder = (id: string) => `folder:${id}`;
 export const keyEvent = (id: string) => `event:${id}`;
 
 export function defaultWorkspace(): Workspace {
@@ -125,6 +127,7 @@ export class Repository {
         createdAt: t,
         updatedAt: t,
         linkedCheckpointId,
+        folderId: null,
         ...(kind ? { kind } : {}),
       };
       const ws = await this.getWorkspace();
@@ -190,6 +193,79 @@ export class Repository {
       await this.area.set({ workspace: { ...ws, openNoteIds, activeNoteId } });
       await this.appendEvent("note.deleted", id, null).catch(() => undefined);
       return true;
+    });
+  }
+
+  // ---- note folders (organizational metadata, no revision guard) ----
+  // Folder membership is placement, not content: moving a note never bumps
+  // its revision, so open drafts keep saving without manufactured conflicts.
+
+  async getFolders(): Promise<NoteFolder[]> {
+    const all = await this.area.get(null);
+    return Object.entries(all)
+      .filter(([key]) => key.startsWith("folder:"))
+      .map(([, value]) => value as NoteFolder)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  }
+
+  createFolder(name: string): Promise<NoteFolder> {
+    return this.enqueue(async () => {
+      const t = nowIso();
+      const folder: NoteFolder = {
+        id: newId(),
+        name: name.trim().slice(0, 100) || "Untitled folder",
+        createdAt: t,
+        updatedAt: t,
+      };
+      await this.area.set({ [keyFolder(folder.id)]: folder });
+      return folder;
+    });
+  }
+
+  renameFolder(id: string, name: string): Promise<NoteFolder | null> {
+    return this.enqueue(async () => {
+      const got = await this.area.get([keyFolder(id)]);
+      const current = got[keyFolder(id)] as NoteFolder | undefined;
+      if (!current) return null;
+      const folder: NoteFolder = {
+        ...current,
+        name: name.trim().slice(0, 100) || current.name,
+        updatedAt: nowIso(),
+      };
+      await this.area.set({ [keyFolder(id)]: folder });
+      return folder;
+    });
+  }
+
+  deleteFolder(id: string): Promise<boolean> {
+    return this.enqueue(async () => {
+      const got = await this.area.get([keyFolder(id)]);
+      if (!got[keyFolder(id)]) return false;
+      const all = await this.area.get(null);
+      const writes: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(all)) {
+        if (!key.startsWith("note:")) continue;
+        const note = value as Note;
+        if (note.folderId === id) writes[key] = { ...note, folderId: null };
+      }
+      await this.area.remove([keyFolder(id)]);
+      if (Object.keys(writes).length > 0) await this.area.set(writes);
+      return true;
+    });
+  }
+
+  moveNote(id: string, folderId: string | null): Promise<{ ok: true; note: Note } | { ok: false; code: "NOT_FOUND" | "NO_SUCH_FOLDER" }> {
+    return this.enqueue(async () => {
+      if (folderId !== null) {
+        const folders = await this.area.get([keyFolder(folderId)]);
+        if (!folders[keyFolder(folderId)]) return { ok: false, code: "NO_SUCH_FOLDER" } as const;
+      }
+      const got = await this.area.get([keyNote(id)]);
+      const current = got[keyNote(id)] as Note | undefined;
+      if (!current) return { ok: false, code: "NOT_FOUND" } as const;
+      const note: Note = { ...current, folderId };
+      await this.area.set({ [keyNote(id)]: note });
+      return { ok: true, note } as const;
     });
   }
 

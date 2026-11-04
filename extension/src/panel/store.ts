@@ -3,6 +3,7 @@ import type {
   Checkpoint,
   LastCapture,
   Note,
+  NoteFolder,
   SummaryJob,
   Workspace,
 } from "../shared/contracts";
@@ -12,9 +13,21 @@ export interface PanelSnapshot {
   workspace: Workspace;
   checkpoints: Checkpoint[];
   notes: Note[];
+  folders: NoteFolder[];
   summaries: Record<string, SummaryJob>;
   events: ActivityEvent[];
   lastCapture: LastCapture | null;
+}
+
+/** Expand folder picks to note ids. Notes inside several picked folders (or
+picked directly) are included once; unknown ids pass through for the worker
+to report as missing. */
+export function expandNoteSelection(notes: Note[], noteIds: string[], folderIds: string[]): string[] {
+  const picked = new Set(folderIds);
+  const fromFolders = notes
+    .filter((n) => n.folderId != null && picked.has(n.folderId))
+    .map((n) => n.id);
+  return Array.from(new Set([...noteIds, ...fromFolders]));
 }
 
 function isLastCapture(value: unknown): value is LastCapture {
@@ -111,15 +124,18 @@ export function snapshotFromStorage(all: Record<string, unknown>): PanelSnapshot
   } as Workspace;
   const checkpoints: Checkpoint[] = [];
   const notes: Note[] = [];
+  const folders: NoteFolder[] = [];
   const summaries: Record<string, SummaryJob> = {};
   const events: ActivityEvent[] = [];
   for (const [key, value] of Object.entries(all)) {
     if (key.startsWith("checkpoint:")) checkpoints.push(value as Checkpoint);
     else if (key.startsWith("note:")) notes.push(value as Note);
+    else if (key.startsWith("folder:")) folders.push(value as NoteFolder);
     else if (key.startsWith("summary:")) summaries[(value as SummaryJob).checkpointId] = value as SummaryJob;
     else if (key.startsWith("event:")) events.push(value as ActivityEvent);
   }
   checkpoints.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  folders.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
   events.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
   for (const job of Object.values(summaries)) {
     // Records written before warnings existed.
@@ -130,7 +146,7 @@ export function snapshotFromStorage(all: Record<string, unknown>): PanelSnapshot
   }
   const rawLast = all["meta:lastCapture"];
   const lastCapture = isLastCapture(rawLast) ? rawLast : null;
-  return { workspace, checkpoints, notes, summaries, events, lastCapture };
+  return { workspace, checkpoints, notes, folders, summaries, events, lastCapture };
 }
 
 export function sendCommand<T>(message: unknown): Promise<T> {
