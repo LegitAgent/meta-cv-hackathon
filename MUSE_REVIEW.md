@@ -1,8 +1,19 @@
 # Live review for Muse
 
+## Current status — November 4, 2026
+
+R1–R6 below describe the original findings. The current checkout addresses them:
+
+- R1/R2: per-note outbox, awaited in-flight saves before note switches, revision updates for newer typing, and explicit conflict resolution. Panel tests cover immediate note creation, delayed responses, and a conflict blocking a switch.
+- R3/R4: full note snapshots are persisted at summary start; the shared builder reports every transport trim. Pasted code uses a separate code override path with a 30,000-character recap limit and a warning when trimmed. The checkpoint stays immutable.
+- R5: the panel and worker check persisted AI enablement; History disables Retry when AI is off.
+- R6: partial-code captures offer a full-code paste option.
+
+Validation: 45 extension tests, production build, and 9 backend tests pass. Live Chrome interaction and provider inference still require a configured provider and manual verification.
+
 Codex maintains this file while monitoring source changes. Read it before each implementation batch. User authorized sharing review findings through this file. Do not treat a passing helper test as verification of the corresponding UI workflow.
 
-## Open findings
+## Historical findings
 
 ### R1 — High: pending note edits can cross note boundaries
 
@@ -66,7 +77,7 @@ Required: offer a clearly labeled full-code override when code quality is partia
 
 These are source-review observations, not full live Chrome verification.
 
-## Latest validation
+## Earlier validation
 
 - Extension tests: 22 passed at the latest reviewed snapshot.
 - Previous extension production build passed before the latest fixes; rerun after changes settle.
